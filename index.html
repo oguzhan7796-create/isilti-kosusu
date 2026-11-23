@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1b1033">
+<meta name="robots" content="noindex, nofollow">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="description" content="Gri Gölge şehrin renklerini çaldı. Şenay ile koş, kristalleri topla ve Gökkuşağı Kulesi'nin yedi rengini geri getir!">
+<title>Işıltı Koşusu</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/icon-192.png">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="flash"></div>
+<div id="speedlines"></div>
+
+<div id="ui">
+  <!-- Yükleniyor -->
+  <section id="loading" class="screen show">
+    <div class="logo"><span class="l1">IŞILTI</span><span class="l2">KOŞUSU</span></div>
+    <div class="bar"><i id="loadbar"></i></div>
+    <p id="loadtxt">Renkler hazırlanıyor…</p>
+  </section>
+
+  <!-- Ana menü -->
+  <section id="menu" class="screen">
+    <div class="topbar">
+      <div class="chip"><span class="coin-ico"></span><b id="menuCoins">0</b></div>
+      <div class="chip"><span class="ico">🏆</span><b id="menuBest">0</b></div>
+      <div class="chip mult">x<b id="menuMult">1</b></div>
+    </div>
+    <div class="menu-head">
+      <div class="logo big"><span class="l1">IŞILTI</span><span class="l2">KOŞUSU</span></div>
+    </div>
+    <div class="menu-cards">
+      <button class="card tower-card" data-open="story">
+        <div class="tc-head"><b>Gökkuşağı Kulesi</b><span id="towerCount">0/7</span></div>
+        <div class="tc-dots" id="towerDots"></div>
+        <div class="bar small"><i id="towerBar"></i></div>
+        <small id="towerNext">Kırmızı için 0/15 💎</small>
+      </button>
+      <div class="card daily-card" id="dailyCard">
+        <span class="dc-ico" id="dailyIco">📅</span>
+        <div class="dc-body"><small>GÜNLÜK GÖREV</small><p id="dailyText"></p><div class="bar small"><i id="dailyBar"></i></div></div>
+        <button class="btn claim" id="btnDaily">+600</button>
+      </div>
+    </div>
+    <div class="menu-bottom">
+      <button id="btnPlay" class="btn primary huge"><span>KOŞ!</span></button>
+      <div class="menu-grid">
+        <button class="btn tile" data-open="missions"><span class="ico">🎯</span>Görevler<i class="badge" id="missionBadge"></i></button>
+        <button class="btn tile" data-open="shop"><span class="ico">🛍️</span>Mağaza</button>
+        <button class="btn tile" data-open="story"><span class="ico">📖</span>Hikâye<i class="badge" id="storyBadge"></i></button>
+        <button class="btn tile" data-open="settings"><span class="ico">⚙️</span>Ayarlar</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Hikâye -->
+  <section id="story" class="screen dark">
+    <div class="story-card panel">
+      <div class="story-img"><img id="storyImg" alt=""><div class="locked" id="storyLock"></div></div>
+      <div class="story-body">
+        <small id="storyStep"></small>
+        <h2 id="storyTitle"></h2>
+        <p id="storyText"></p>
+      </div>
+      <div class="story-nav">
+        <button class="btn ghost" id="storyPrev">‹</button>
+        <div class="dots" id="storyDots"></div>
+        <button class="btn primary" id="storyNext">İleri</button>
+      </div>
+      <button class="btn link" id="storySkip">Atla</button>
+    </div>
+  </section>
+
+  <!-- Görevler -->
+  <section id="missions" class="screen dark">
+    <div class="panel sheet">
+      <header><h2>Görevler</h2><button class="btn close" data-close>✕</button></header>
+      <div class="set-head">
+        <div class="mult-big">x<b id="missionMult">1</b></div>
+        <div><b id="setTitle">Görev Seti 1</b><small id="setInfo">3 görevi bitir: çarpan +1</small></div>
+      </div>
+      <ul id="missionList" class="list missions"></ul>
+      <div class="daily-big" id="dailyBig"></div>
+    </div>
+  </section>
+
+  <!-- Mağaza -->
+  <section id="shop" class="screen dark">
+    <div class="panel sheet">
+      <header><h2>Mağaza</h2><div class="chip"><span class="coin-ico"></span><b id="shopCoins">0</b></div><button class="btn close" data-close>✕</button></header>
+      <div class="tabs" id="shopTabs"><button data-tab="up" class="on">⚡ Yetenekler</button><button data-tab="look">✨ Görünüm</button></div>
+      <ul id="shopList" class="list"></ul>
+    </div>
+  </section>
+
+  <!-- Ayarlar -->
+  <section id="settings" class="screen dark">
+    <div class="panel sheet">
+      <header><h2>Ayarlar</h2><button class="btn close" data-close>✕</button></header>
+      <ul class="list settings">
+        <li><span>Müzik</span><button class="toggle" id="setMusic"></button></li>
+        <li><span>Ses efektleri</span><button class="toggle" id="setSfx"></button></li>
+        <li><span>Grafik</span><div class="seg" id="setQuality"><button data-q="low">Hızlı</button><button data-q="medium">Dengeli</button><button data-q="high">Güzel</button></div></li>
+      </ul>
+      <div class="controls-help">
+        <h3>Kontroller</h3>
+        <p><b>Telefon:</b> sola/sağa kaydır = şerit · yukarı = zıpla · aşağı = kay · ⚡ = Renk Patlaması</p>
+        <p><b>Klavye:</b> ← → · ↑ / Boşluk = zıpla · ↓ = kay · E = Renk Patlaması · P = duraklat</p>
+      </div>
+      <button class="btn danger" id="btnReset">İlerlemeyi sıfırla</button>
+      <p class="credits">Işıltı Koşusu · Senova Games</p>
+    </div>
+  </section>
+
+  <!-- Oyun içi arayüz -->
+  <section id="hud" class="screen hud">
+    <div class="hud-top">
+      <div class="hud-score">
+        <b id="hudScore">0</b>
+        <span><i id="hudMult">x1</i> <em id="hudDist">0 m</em></span>
+      </div>
+      <div class="hud-right">
+        <div class="chip"><span class="ico">💎</span><b id="hudCrystals">0</b></div>
+        <div class="chip"><span class="coin-ico"></span><b id="hudCoins">0</b></div>
+        <button class="btn round" id="btnPause" aria-label="Duraklat">❚❚</button>
+      </div>
+    </div>
+    <div id="bossWrap" class="bossbar"><small><span id="bossName">MUHAFIZ</span> · <span id="bossTime">45</span> sn</small><div class="bar"><i id="bossBar"></i></div></div>
+    <div id="powerList" class="power-list"></div>
+    <div id="missionPop" class="mission-pop"></div>
+    <div id="banner" class="banner"><small id="bannerChapter"></small><h2 id="bannerTitle"></h2><p id="bannerLine"></p></div>
+    <div id="toast" class="toast"></div>
+    <div id="colorPop" class="color-pop"><small>GÖKKUŞAĞI KULESİ</small><h2 id="colorPopName">KIRMIZI</h2><p>geri döndü!</p></div>
+    <div id="hint" class="hint"></div>
+    <button id="btnBurst" class="burst" aria-label="Renk Patlaması">
+      <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" class="track"/><circle cx="50" cy="50" r="44" class="fill" id="burstRing"/></svg>
+      <span>⚡</span>
+    </button>
+  </section>
+
+  <!-- Duraklatma -->
+  <section id="pause" class="screen dark">
+    <div class="panel sheet small">
+      <h2>Duraklatıldı</h2>
+      <ul id="pauseMissions" class="list mini"></ul>
+      <button class="btn primary" id="btnResume">Devam et</button>
+      <div class="row2">
+        <button class="btn toggle-btn" id="pauseMusic">♪ Müzik</button>
+        <button class="btn toggle-btn" id="pauseSfx">🔊 Efekt</button>
+      </div>
+      <button class="btn ghost" id="btnQuit">Ana menü</button>
+    </div>
+  </section>
+
+  <!-- Oyun sonu -->
+  <section id="gameover" class="screen dark">
+    <div class="panel sheet small">
+      <h2 id="goTitle">Yakalandın!</h2>
+      <div id="goNew" class="newbest">YENİ REKOR!</div>
+      <div class="go-score"><b id="goScore">0</b><span>PUAN · EN İYİ <em id="goBest">0</em></span></div>
+      <div class="go-stats">
+        <div><b id="goDist">0</b><span>metre</span></div>
+        <div><b id="goCoins">0</b><span>altın</span></div>
+        <div><b id="goCrystals">0</b><span>kristal</span></div>
+      </div>
+      <div class="go-tower"><div class="tc-dots" id="goTowerDots"></div><div class="bar small"><i id="goTowerBar"></i></div><small id="goTowerTxt"></small></div>
+      <ul id="goMissions" class="list mini"></ul>
+      <button class="btn revive" id="btnRevive"><span>Devam et</span><em><span class="coin-ico"></span><b id="reviveCost">300</b></em><i class="revive-timer" id="reviveTimer"></i></button>
+      <button class="btn primary" id="btnAgain">Tekrar koş</button>
+      <button class="btn ghost" id="btnMenu">Ana menü</button>
+    </div>
+  </section>
+</div>
+
+<div id="notice" class="notice"></div>
+<div id="rotate" class="rotate">📱 Telefonu dik tut</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
