@@ -1,5 +1,5 @@
 // Ekranlar, HUD, görevler, mağaza, hikâye, Gökkuşağı Kulesi
-import { POWERUPS, BURST, STORY, MAX_UPGRADE, HERO_NAME, COLORS, TRAILS, DAILY_REWARD } from './config.js';
+import { POWERUPS, BURST, STORY, MAX_UPGRADE, HERO_NAME, COLORS, TRAILS, DAILY_REWARD, TURBO } from './config.js';
 import {
   save, persist, missionText, missionIcon, multiplier, upgradeCost, colorsRestored, nextColor,
   ensureDaily, dailyText, dailyIcon, setReward,
@@ -8,7 +8,15 @@ import { isTouch } from './input.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Math.floor(n).toLocaleString('tr-TR');
-const ICONS = { magnet: '🧲', shield: '🛡️', sneakers: '👟', double: '✨', burst: '⚡' };
+const svg = (inner) => `<svg viewBox="0 0 24 24" aria-hidden="true">${inner}</svg>`;
+// güç simgeleri: oyundaki 3D modellerle aynı biçimler (beyaz, renkli zemin üstünde)
+export const ICONS = {
+  magnet: svg('<path d="M5 3h5v8a2 2 0 0 0 4 0V3h5v8a7 7 0 0 1-14 0z" fill="currentColor"/><path d="M5 3h5v3.4H5zM14 3h5v3.4h-5z" fill="rgba(0,0,0,.28)"/>'),
+  shield: svg('<path d="M12 2.5l7.5 2.8v5.6c0 4.9-3.2 9-7.5 10.6-4.3-1.6-7.5-5.7-7.5-10.6V5.3z" fill="currentColor"/><path d="M12 7.2l1.4 2.9 3.1.4-2.3 2.2.6 3.1-2.8-1.5-2.8 1.5.6-3.1-2.3-2.2 3.1-.4z" fill="rgba(0,0,0,.28)"/>'),
+  sneakers: svg('<path d="M3 15.6c0-1.7.4-3.5 1-4.9l.6-1.4h3.7l1.4 2.2c1.6.6 4.6 1.2 7.8 1.8 2.6.5 3.5 1.4 3.5 2.9v.6H3z" fill="currentColor"/><path d="M3 17.9h18v1.7H3z" fill="currentColor" opacity=".75"/><path d="M8.4 9.1C7 6.4 4.6 4.6 1.8 4.4c1.3.8 2 1.6 2.2 2.4-.9-.3-1.8-.3-2.7 0 1.2.4 2 1 2.4 1.8-.7 0-1.4.2-2 .6 1.4.1 2.6.6 3.4 1.4z" fill="currentColor" opacity=".9"/>'),
+  double: svg('<text x="12" y="17.2" text-anchor="middle" font-size="14" font-weight="900" font-family="system-ui,sans-serif" fill="currentColor">x2</text>'),
+  burst: svg('<path d="M13.5 2 4.5 13.5h6.2L9.8 22l9.7-12.2h-6.4z" fill="currentColor"/>'),
+};
 const SCREENS = ['loading', 'menu', 'story', 'missions', 'shop', 'settings', 'hud', 'pause', 'gameover'];
 
 export class UI {
@@ -32,6 +40,13 @@ export class UI {
     const fireBurst = (e) => { e.preventDefault(); e.stopPropagation(); this.h.burst(); };
     burst.addEventListener('touchstart', fireBurst, { passive: false });
     burst.addEventListener('mousedown', fireBurst);
+    const turbo = $('btnTurbo');
+    if (turbo && !TURBO.enabled) turbo.remove();
+    else if (turbo) {
+      const fireTurbo = (e) => { e.preventDefault(); e.stopPropagation(); this.h.turbo(); };
+      turbo.addEventListener('touchstart', fireTurbo, { passive: false });
+      turbo.addEventListener('mousedown', fireTurbo);
+    }
     $('shopTabs').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
       this.h.click(); this.shopTab = b.dataset.tab;
       $('shopTabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
@@ -315,18 +330,25 @@ export class UI {
     const sig = keys.join(',');
     const list = $('powerList');
     if (c.psig !== sig) {
-      list.innerHTML = keys.map((k) => `<div class="power-item" data-k="${k}"><span class="pi" style="background:${POWERUPS[k].color}">${ICONS[k]}</span>${POWERUPS[k].short}<span class="pbar"><i></i></span></div>`).join('');
+      list.innerHTML = keys.map((k) => `<div class="power-item" data-k="${k}" style="--c:${POWERUPS[k].color}"><span class="pi"><span class="pin">${ICONS[k]}</span></span><span class="pn">${POWERUPS[k].short}</span><b class="ps"></b></div>`).join('');
       c.psig = sig;
       c.pw = {};
     }
     keys.forEach((k) => {
-      const w = Math.round(Math.max(0, Math.min(1, s.powers[k] / s.powerMax[k])) * 50);
-      if (c.pw[k] !== w) {
-        const el = list.querySelector(`[data-k="${k}"] .pbar i`);
-        if (el) el.style.width = `${w * 2}%`;
-        c.pw[k] = w;
+      const pct = Math.round(Math.max(0, Math.min(1, s.powers[k] / s.powerMax[k])) * 100);
+      const sec = Math.max(0, Math.ceil(s.powers[k]));
+      const key = pct * 1000 + sec;
+      if (c.pw[k] !== key) {
+        const el = list.querySelector(`[data-k="${k}"]`);
+        if (el) { el.style.setProperty('--p', pct); el.querySelector('.ps').textContent = sec; }
+        c.pw[k] = key;
       }
     });
+    if (c.turbo !== s.turboOn) {
+      const tb = $('btnTurbo');
+      if (tb) tb.classList.toggle('on', !!s.turboOn);
+      c.turbo = s.turboOn;
+    }
   }
 
   toast(text, ms = 1400) {

@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import {
   START_SPEED, MAX_SPEED, SPEED_GAIN, DISTRICTS, DISTRICT_LEN, POWERUPS, BURST, LANES,
-  BOSS_FIRST, BOSS_EVERY, BOSS_TIME, TRAILS,
+  BOSS_FIRST, BOSS_EVERY, BOSS_TIME, TRAILS, TURBO, COLORS,
 } from './config.js';
 import {
   save, persist, multiplier, newMissionSet, isRunMission, totalKey, setReward, colorsRestored, ensureDaily,
@@ -17,8 +17,11 @@ const TUTORIAL_END = 470;
 export class Game {
   constructor(o) {
     Object.assign(this, o); // scene, camera, player, track, world, particles, drone, boss, audio, ui, onOver
-    this.camPos = new THREE.Vector3(0, 4.6, 7.6);
-    this.camLook = new THREE.Vector3(0, 1.2, -11);
+    this.camPos = new THREE.Vector3(0, 4.45, 7.2);
+    this.camLook = new THREE.Vector3(0, 1.35, -11);
+    this.turbo = null;
+    this.bridge = makeBridge();
+    this.scene.add(this.bridge);
     this.shake = 0;
     this.time = 0;
     this.active = false;
@@ -67,6 +70,9 @@ export class Game {
     this.runSat = 0.45;
     this.trail = TRAILS.find((x) => x.id === save.trail) || TRAILS[0];
     this.colorsAtStart = colorsRestored();
+    this.turbo = null;
+    this.bridge.visible = false;
+    this.bridge.material.uniforms.a.value = 0;
 
     ensureDaily();
     save.missions.forEach((m) => { if (isRunMission(m) && !m.done) m.progress = 0; });
@@ -132,6 +138,65 @@ export class Game {
     if (this.boss.active && this.boss.hit(this.player)) {
       this.score += 500 * this.mult;
       this.ui.toast(this.boss.hp > 0 ? `💥 İsabet! ${this.boss.hp} kaldı` : '💥 YENİLDİ!', 1300);
+    }
+  }
+
+  // ---------- Turbo (test için ücretsiz) ----------
+  activateTurbo() {
+    if (!TURBO.enabled || !this.canAct() || this.turbo) return;
+    if (this.boss.active) { this.boss.stop(); this.endEncounter(true); }
+    if (this.tutorial) {
+      this.tutorial = false; save.tutorialDone = true; persist();
+      this.track.tutorialRows = []; this.track.hints = [];
+    }
+    const target = (Math.floor(this.distance / DISTRICT_LEN) + 1) * DISTRICT_LEN + TURBO.past;
+    const rem = target - this.distance;
+    const total = save.crystalsTotal + this.crystals;
+    const n = colorsRestored(total);
+    const need = n < COLORS.length ? COLORS[n].need - total : 0;
+    this.turbo = {
+      start: this.distance, target, rem, need, given: 0, h: this.player.y, scroll: 0,
+      speed: clamp(rem / (TURBO.time - 0.6), TURBO.minSpeed, TURBO.maxSpeed),
+    };
+    this.track.pauseGen = true;
+    this.track.clearAhead(this.distance, 1e6);
+    this.player.sliding = 0;
+    this.stumble = 0;
+    this.audio.burst();
+    this.ui.flash();
+    this.shake = 0.3;
+    const next = n < COLORS.length ? `<br><small>${COLORS[n].name} rengi için +${need} 💎</small>` : '';
+    this.ui.toast(`<span style="color:#ffd23f">TURBO!</span>${next}`, 1500);
+    this.particles.emit(this.player.x, 0.6, 0, { n: 60, rainbow: true, speed: 8, vy: 3, life: 0.8, size: 0.45 });
+  }
+
+  endTurbo() {
+    const T = this.turbo;
+    if (!T) return;
+    if (T.given < T.need) this.grantCrystals(T.need - T.given);
+    this.turbo = null;
+    this.bridgeH = T.h;
+    this.track.pauseGen = false;
+    this.track.cursor = Math.max(this.track.cursor, this.distance + 55);
+    this.player.invuln = Math.max(this.player.invuln, 1.0);
+    this.nextBoss = Math.max(this.nextBoss, this.distance + 220);
+  }
+
+  grantCrystals(n) {
+    if (n <= 0) return;
+    const before = colorsRestored(save.crystalsTotal + this.crystals);
+    this.crystals += n;
+    this.score += 60 * n * this.mult;
+    const after = colorsRestored(save.crystalsTotal + this.crystals);
+    this.audio.crystal();
+    const p = this.player;
+    this.particles.emit(p.x, p.y + 1.3, -0.6, { n: 14, rainbow: true, speed: 5, vy: 2.5, life: 0.5, size: 0.35 });
+    if (after > before) {
+      this.ui.colorUnlocked(after - 1);
+      this.audio.restore();
+      this.ui.flash();
+      this.world.setTower(after, this.ui.colors);
+      this.applyBands(after, true);
     }
   }
 
@@ -203,7 +268,7 @@ export class Game {
   }
 
   onCrash(o) {
-    if (!this.canAct()) return;
+    if (!this.canAct() || this.turbo) return;
     if (this.player.invuln > 0) return;
     if (this.powers.shield > 0) {
       this.powers.shield = 0;
@@ -218,7 +283,7 @@ export class Game {
   }
 
   onSideHit() {
-    if (!this.canAct() || this.time - this.lastSide < 0.5) return;
+    if (!this.canAct() || this.turbo || this.time - this.lastSide < 0.5) return;
     this.lastSide = this.time;
     this.player.bounceBack();
     this.audio.stumble();
@@ -432,8 +497,21 @@ export class Game {
     const dt = rawDt * this.slowmo;
     const p = this.player;
 
+    const T = this.turbo;
     if (!this.dead) {
-      this.speed += (this.targetSpeed() - this.speed) * Math.min(1, dt * 2.5);
+      if (T) {
+        // turbo: hızlan, köprüde koş, sona yaklaşınca yavaşla ve in
+        const f = clamp((this.distance - T.start) / T.rem, 0, 1);
+        const endZone = this.distance > T.target - T.speed * 0.3;
+        const tgt = endZone ? Math.max(this.targetSpeed(), 30) : T.speed;
+        this.speed += (tgt - this.speed) * Math.min(1, dt * (endZone ? 6 : 4));
+        T.h += ((endZone ? 0 : TURBO.height) - T.h) * Math.min(1, dt * (endZone ? 4 : 5));
+        T.scroll += dt * 26;
+        const want = Math.floor(T.need * clamp(f / 0.85, 0, 1));
+        if (want > T.given && (want - T.given >= Math.max(1, Math.ceil(T.need / 12)) || want === T.need)) {
+          this.grantCrystals(want - T.given); T.given = want;
+        }
+      } else this.speed += (this.targetSpeed() - this.speed) * Math.min(1, dt * 2.5);
       this.distance += this.speed * dt;
       this.score += this.speed * dt * this.mult * 0.5;
       this.run.cleanDist += this.speed * dt;
@@ -441,7 +519,7 @@ export class Game {
       if (this.tutorial && this.distance > TUTORIAL_END) { this.tutorial = false; save.tutorialDone = true; persist(); }
       this.track.diff = clamp(0.1 + this.distance / 3200, 0, 1.25);
       // Gri Gölge karşılaşması
-      if (!this.boss.active && !this.tutorial && this.distance > this.nextBoss) this.startEncounter();
+      if (!this.boss.active && !this.tutorial && !this.turbo && this.distance > this.nextBoss) this.startEncounter();
       if (this.boss.active && !this.boss.dying) {
         this.bossT -= dt;
         this.ui.bossTime(Math.max(0, this.bossT));
@@ -470,8 +548,12 @@ export class Game {
     if (this.coinStreakT > 0) this.coinStreakT -= dt;
 
     const state = { magnet: this.powers.magnet, burst: this.burst };
-    const { groundH, onBus } = this.track.update(dt, this.distance, this.speed, p, state, this.time);
-    const landed = p.update(dt, this.speed, groundH);
+    const tr = this.track.update(dt, this.distance, this.speed, p, state, this.time);
+    const onBus = tr.onBus;
+    const groundH = this.turbo ? Math.max(tr.groundH, this.turbo.h) : tr.groundH;
+    const landed = p.update(dt, Math.min(this.speed, 40), groundH);
+    if (this.turbo && this.distance >= this.turbo.target) this.endTurbo();
+    this.updateBridge(dt);
     if (p.buffered) { p.buffered = false; this.afterJump(); }
     if (landed) {
       this.audio.land();
@@ -525,10 +607,25 @@ export class Game {
     this.ui.hud({
       score: this.score, distance: this.distance, coins: this.coins, mult: this.mult, crystals: this.crystals,
       meter: this.meter, burstOn: this.burst > 0, burstLeft: this.burst / this.burstMax,
-      powers: this.powers, powerMax: this.powerMax,
+      powers: this.powers, powerMax: this.powerMax, turboOn: !!this.turbo,
       bossHp: this.boss.active ? this.boss.hp / this.boss.maxHp : null,
     });
-    this.ui.speedlines(this.burst > 0);
+    this.ui.speedlines(this.burst > 0 || !!this.turbo);
+  }
+
+  updateBridge(dt) {
+    const b = this.bridge; const u = b.material.uniforms;
+    const T = this.turbo;
+    u.a.value += ((T ? 1 : 0) - u.a.value) * Math.min(1, dt * (T ? 8 : 3));
+    b.visible = u.a.value > 0.01;
+    if (!b.visible) return;
+    if (T) {
+      u.scroll.value = T.scroll;
+      this.bridgeH = T.h;
+      const p = this.player;
+      if (Math.random() < dt * 60) this.particles.emit(p.x + (Math.random() - 0.5) * 0.6, T.h + 0.1, 0.4, { n: 1, rainbow: true, speed: 0.8, vz: 24, vy: 0.6, gravity: 0, life: 0.45, size: 0.35 });
+    }
+    b.position.set(this.player.x, (this.bridgeH || 0) - 0.03, 0);
   }
 
   updateDrone(dt) {
@@ -555,11 +652,15 @@ export class Game {
   updateCamera(dt) {
     const p = this.player;
     const burst = this.burst > 0;
-    V1.set(p.x * 0.7, 4.6 + p.y * 0.6, burst ? 8.2 : 7.6);
-    V2.set(p.x * 0.8, 1.2 + p.y * 0.65, -11);
+    const turbo = !!this.turbo;
+    // kamera yana az kayar: şerit değişimi ekranda net ve anında görünür
+    V1.set(p.x * 0.5, 4.45 + p.y * (turbo ? 0.35 : 0.6), burst ? 7.9 : 7.2);
+    V2.set(p.x * 0.6, 1.35 + p.y * 0.65, -11);
     const k = Math.min(1, dt * 8);
-    this.camPos.lerp(V1, k);
-    this.camLook.lerp(V2, k);
+    const kx = Math.min(1, dt * 12);
+    const cp = this.camPos; const cl = this.camLook;
+    cp.x += (V1.x - cp.x) * kx; cp.y += (V1.y - cp.y) * k; cp.z += (V1.z - cp.z) * k;
+    cl.x += (V2.x - cl.x) * kx; cl.y += (V2.y - cl.y) * k; cl.z += (V2.z - cl.z) * k;
     this.camera.position.copy(this.camPos);
     if (this.shake > 0) {
       this.shake -= dt;
@@ -568,10 +669,38 @@ export class Game {
       this.camera.position.y += (Math.random() - 0.5) * s;
     }
     this.camera.lookAt(this.camLook);
-    const fov = burst ? 72 : 60 + Math.min(7, (this.speed - START_SPEED) * 0.35);
+    const fov = turbo ? 70 : burst ? 72 : 60 + Math.min(7, (this.speed - START_SPEED) * 0.35);
     if (Math.abs(this.camera.fov - fov) > 0.05) {
       this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 4);
       this.camera.updateProjectionMatrix();
     }
   }
+}
+
+// Turbo'nun gökkuşağı köprüsü
+function makeBridge() {
+  const geo = new THREE.PlaneGeometry(1.8, 170, 1, 1).rotateX(-Math.PI / 2).translate(0, 0, -78);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { scroll: { value: 0 }, a: { value: 0 } },
+    vertexShader: `varying vec2 vUv; varying float vZ;
+      void main(){ vUv = uv; vec4 wp = modelMatrix * vec4(position, 1.0); vZ = wp.z; gl_Position = projectionMatrix * viewMatrix * wp; }`,
+    fragmentShader: `uniform float scroll; uniform float a; varying vec2 vUv; varying float vZ;
+      vec3 hue(float h){ return clamp(abs(mod(h*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0,0.0,1.0); }
+      void main(){
+        float x = vUv.x;
+        vec3 c = hue(x * 0.82);
+        float edge = smoothstep(0.0, 0.06, x) * smoothstep(1.0, 0.94, x);
+        float ph = fract(vUv.y * 60.0 + scroll);
+        float dash = smoothstep(0.35, 0.5, ph) * (1.0 - smoothstep(0.5, 0.65, ph));
+        c = c * 1.2 + dash * 0.45;
+        float fade = smoothstep(-165.0, -70.0, vZ) * smoothstep(9.0, 2.0, vZ);
+        gl_FragColor = vec4(c, a * edge * fade * 0.9);
+      }`,
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const m = new THREE.Mesh(geo, mat);
+  m.frustumCulled = false;
+  m.renderOrder = 2;
+  m.visible = false;
+  return m;
 }

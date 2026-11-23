@@ -2,6 +2,7 @@
 // Performans: her bölgenin engelleri tek doku atlasını paylaşır (engel başına 1 çizim).
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { makePowerPickup, animatePickup } from './pickups.js';
 import { LANES, BUS_H, DISTRICTS, DISTRICT_LEN, PLAYER_W, PLAYER_DEPTH, JUMP_HEIGHT, GRAVITY } from './config.js';
 import { patchSat } from './world.js';
 
@@ -112,37 +113,6 @@ export class Track {
     this.haloMat = new THREE.SpriteMaterial({
       map: tex(64, 64, (g) => { const gr = g.createRadialGradient(32, 32, 2, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,0.9)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); }),
       color: 0xffb3ff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    });
-
-    this.powerTex = {};
-    const drawIcon = {
-      magnet: (g) => {
-        g.lineWidth = 18; g.lineCap = 'butt'; g.strokeStyle = '#ff4d6d';
-        g.beginPath(); g.arc(64, 58, 26, Math.PI, 0); g.stroke();
-        g.beginPath(); g.moveTo(38, 58); g.lineTo(38, 86); g.moveTo(90, 58); g.lineTo(90, 86); g.stroke();
-        g.strokeStyle = '#ffffff'; g.beginPath(); g.moveTo(38, 80); g.lineTo(38, 92); g.moveTo(90, 80); g.lineTo(90, 92); g.stroke();
-      },
-      shield: (g) => {
-        g.fillStyle = '#4cc9f0'; g.beginPath(); g.moveTo(64, 26); g.lineTo(96, 38); g.quadraticCurveTo(94, 84, 64, 102); g.quadraticCurveTo(34, 84, 32, 38); g.closePath(); g.fill();
-        g.fillStyle = 'rgba(255,255,255,0.7)'; g.beginPath(); g.moveTo(64, 36); g.lineTo(86, 44); g.quadraticCurveTo(84, 76, 64, 90); g.closePath(); g.fill();
-      },
-      sneakers: (g) => {
-        g.fillStyle = '#80ed99'; g.beginPath(); g.moveTo(28, 82); g.lineTo(30, 56); g.lineTo(56, 52); g.lineTo(70, 66); g.lineTo(100, 72); g.quadraticCurveTo(104, 84, 96, 88); g.lineTo(30, 88); g.closePath(); g.fill();
-        g.fillStyle = '#ffffff'; g.fillRect(28, 84, 74, 8);
-        g.strokeStyle = '#ffffff'; g.lineWidth = 5; g.beginPath(); g.moveTo(40, 40); g.lineTo(52, 30); g.moveTo(58, 40); g.lineTo(70, 28); g.stroke();
-      },
-      double: (g) => {
-        g.fillStyle = '#ffd166'; g.font = '900 54px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-        g.fillText('x2', 64, 68);
-      },
-    };
-    Object.keys(drawIcon).forEach((k) => {
-      this.powerTex[k] = tex(128, 128, (g) => {
-        const gr = g.createRadialGradient(64, 64, 20, 64, 64, 64);
-        gr.addColorStop(0, 'rgba(40,20,80,0.95)'); gr.addColorStop(0.78, 'rgba(70,40,140,0.9)'); gr.addColorStop(0.86, 'rgba(255,255,255,0.95)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
-        g.fillStyle = gr; g.beginPath(); g.arc(64, 64, 64, 0, Math.PI * 2); g.fill();
-        drawIcon[k](g);
-      });
     });
 
     this.reset({});
@@ -290,12 +260,12 @@ export class Track {
     c.barrierGeo = mergeGeometries(barrier);
     // üst tabela
     const high = [
-      atlasBox(2.1, 1.05, 0.16, [P.METAL, P.METAL, P.METAL, P.METAL, P.SIGN, P.SIGN], 0, 1.85, 0),
-      atlasAll(new THREE.CylinderGeometry(0.07, 0.07, 2.6, 8).translate(-1.12, 1.3, 0), P.METAL),
-      atlasAll(new THREE.CylinderGeometry(0.07, 0.07, 2.6, 8).translate(1.12, 1.3, 0), P.METAL),
-      atlasBox(2.4, 0.1, 0.1, [P.METAL, P.METAL, P.METAL, P.METAL, P.METAL, P.METAL], 0, 2.42, 0),
+      atlasBox(2.1, 1.05, 0.16, [P.METAL, P.METAL, P.METAL, P.METAL, P.SIGN, P.SIGN], 0, 2.07, 0),
+      atlasAll(new THREE.CylinderGeometry(0.07, 0.07, 2.8, 8).translate(-1.12, 1.4, 0), P.METAL),
+      atlasAll(new THREE.CylinderGeometry(0.07, 0.07, 2.8, 8).translate(1.12, 1.4, 0), P.METAL),
+      atlasBox(2.4, 0.1, 0.1, [P.METAL, P.METAL, P.METAL, P.METAL, P.METAL, P.METAL], 0, 2.64, 0),
     ];
-    if (neon) high.push(atlasAll(new THREE.CylinderGeometry(0.04, 0.04, 2.2, 6).rotateZ(Math.PI / 2).translate(0, 1.3, 0), P.GLOWR));
+    if (neon) high.push(atlasAll(new THREE.CylinderGeometry(0.04, 0.04, 2.2, 6).rotateZ(Math.PI / 2).translate(0, 1.5, 0), P.GLOWR));
     c.highGeo = mergeGeometries(high);
     // otobüs (uzunluğa göre)
     c.busGeos = new Map();
@@ -339,7 +309,7 @@ export class Track {
     const c = this.C(this.districtAt(d));
     let len; let top; let bottom = 0; let geo; let mat = c.mat;
     if (type === 'barrier') { len = 0.5; top = 1.05; geo = c.barrierGeo; }
-    else if (type === 'high') { len = 0.4; top = 2.6; bottom = 1.25; geo = c.highGeo; }
+    else if (type === 'high') { len = 0.4; top = 2.8; bottom = 1.4; geo = c.highGeo; }
     else if (type === 'bus') { len = opts.len || 12; top = BUS_H; geo = c.busGeo(len); }
     else if (type === 'ramp') { len = RAMP_LEN; top = BUS_H; geo = c.rampGeo; }
     else if (type === 'laserLow') { len = 0.35; top = 0.85; geo = c.laserLowGeo; mat = c.matPlain; lane = 1; }
@@ -383,12 +353,10 @@ export class Track {
     this.crystals.push({ lane, d, y, mesh });
   }
 
-  addPower(lane, d, kind, y = 1.2) {
-    const mat = new THREE.SpriteMaterial({ map: this.powerTex[kind], depthWrite: false });
-    const mesh = new THREE.Sprite(mat);
-    mesh.scale.set(1.3, 1.3, 1);
+  addPower(lane, d, kind, y = 1.25) {
+    const mesh = makePowerPickup(kind);
     this.group.add(mesh);
-    this.powers.push({ lane, d, y, kind, mesh });
+    this.powers.push({ lane, d, y, kind, mesh, phase: Math.random() * 6 });
   }
 
   laneFree(lane, from, to) {
@@ -640,7 +608,8 @@ export class Track {
       const p = this.powers[k];
       const z = distance - p.d;
       if (z > 6) { this.group.remove(p.mesh); this.powers.splice(k, 1); continue; }
-      p.mesh.position.set(LANES[p.lane], p.y + Math.sin(t * 2.5) * 0.18, z);
+      p.mesh.position.set(LANES[p.lane], p.y + Math.sin(t * 2.5 + p.phase) * 0.16, z);
+      animatePickup(p.mesh, t, p.phase);
       if (Math.abs(LANES[p.lane] - px) < 1.0 && Math.abs(z) < 1.0 && Math.abs(p.y - py) < 1.6 && !player.dead) {
         this.group.remove(p.mesh); this.powers.splice(k, 1);
         this.emit('power', p.kind, LANES[p.lane], p.y, z);

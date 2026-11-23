@@ -19,6 +19,12 @@ export const PLAYER_W = 0.6;
 export const PLAYER_DEPTH = 0.55;
 export const PLAYER_H = 1.75;
 export const PLAYER_SLIDE_H = 0.75;
+// Görsel boy çarpanı: çarpışma kutuları aynı kalır, karakter haritaya göre daha iri görünür
+export const HERO_SCALE = 1.2;
+
+// Test için ücretsiz Turbo: gökkuşağı köprüsünde bir sonraki bölgeye uçar,
+// sıradaki rengi açacak kadar kristal toplar. Oyunu yayına alırken enabled: false yap.
+export const TURBO = { enabled: true, time: 3.0, minSpeed: 60, maxSpeed: 430, height: 2.7, past: 25 };
 
 export const BUS_H = 2.6;
 export const DISTRICT_LEN = 1000;

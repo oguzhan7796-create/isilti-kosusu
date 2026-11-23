@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { STORY, HERO_NAME, COLORS } from './config.js';
+import { STORY, HERO_NAME, COLORS, HERO_SCALE } from './config.js';
 import { save, persist, resetProgress, colorsRestored } from './save.js';
 import { World, colorUniforms } from './world.js';
 import { Track } from './track.js';
@@ -108,6 +108,7 @@ const ui = new UI({
     if (game.revive()) { ui.only(['hud']); state = 'play'; input.enabled = true; }
   },
   burst: () => { if (state === 'play' && countdown <= 0) game.activateBurst(); },
+  turbo: () => { if (state === 'play' && countdown <= 0) game.activateTurbo(); },
   buy: () => audio.buy(),
   settings: () => { audio.setMusic(save.settings.music); audio.setSfx(save.settings.sfx); },
   quality: (q) => applyQuality(resolveQuality(q)),
@@ -122,6 +123,7 @@ const input = new Input(document.body, {
   up: () => countdown <= 0 && game.up(),
   down: () => countdown <= 0 && game.down(),
   burst: () => countdown <= 0 && game.activateBurst(),
+  turbo: () => countdown <= 0 && game.activateTurbo(),
   pause: () => { if (state === 'play') pauseGame(); else if (state === 'pause') resumeGame(); },
 });
 
@@ -249,6 +251,7 @@ function prewarm() {
   boss.root.visible = true; boss.beam.visible = true; boss.ray.visible = true; boss.figure.visible = true;
   player.shieldMesh.visible = true; player.aura.visible = true; player.magnetRing.visible = true;
   drone.visible = true;
+  game.bridge.visible = true;
   particles.emit(0, 1, -3, { n: 5 });
   renderer.compile(scene, camera);
   if (P.bloom && composer) composer.render(); else renderer.render(scene, camera);
@@ -258,6 +261,7 @@ function prewarm() {
   world.reset();
   boss.stop(); boss.figure.visible = false;
   player.shieldMesh.visible = false; player.aura.visible = false; player.magnetRing.visible = false;
+  game.bridge.visible = false;
   particles.clear();
 }
 
@@ -368,8 +372,9 @@ function frame() {
     const a = menuT * 0.12;
     // portrede Şenay'ı logonun altında, kartların üstünde göster
     const portrait = innerHeight > innerWidth;
-    camera.position.set(Math.sin(a) * 0.6 + 0.3, portrait ? 1.25 : 1.55, portrait ? 4.9 : 4.4);
-    camera.lookAt(0, portrait ? 0.55 : 1.15, 0);
+    const hs = HERO_SCALE;
+    camera.position.set((Math.sin(a) * 0.6 + 0.3) * hs, (portrait ? 1.25 : 1.55) * hs, (portrait ? 4.9 : 4.4) * hs);
+    camera.lookAt(0, (portrait ? 0.55 : 1.15) * hs, 0);
     if (Math.random() < dt * 5) particles.emit((Math.random() - 0.5) * 3, Math.random() * 2.5, (Math.random() - 0.5) * 2, { n: 1, rainbow: true, speed: 0.3, vy: 0.5, gravity: -0.3, life: 1.6, size: 0.18 });
   }
 

@@ -1,8 +1,10 @@
 // Kahraman: model, animasyonlar, şerit/zıplama/kayma hareketi ve görsel efektler
 import * as THREE from 'three';
 import {
-  LANES, GRAVITY, JUMP_HEIGHT, SUPER_JUMP_HEIGHT, SLIDE_TIME, PLAYER_H, PLAYER_SLIDE_H, SLIDE_POSE,
+  LANES, GRAVITY, JUMP_HEIGHT, SUPER_JUMP_HEIGHT, SLIDE_TIME, PLAYER_H, PLAYER_SLIDE_H, SLIDE_POSE, HERO_SCALE,
 } from './config.js';
+
+const S = HERO_SCALE;
 
 const AX = new THREE.Vector3(1, 0, 0);
 const AY = new THREE.Vector3(0, 1, 0);
@@ -35,7 +37,7 @@ export class Player {
     // Model boyu ~1 birim ve +X yönüne bakıyor: büyüt ve -Z (koşu yönü) yönüne çevir
     const box = new THREE.Box3().setFromObject(model);
     const h = box.max.y - box.min.y;
-    const s = PLAYER_H / h;
+    const s = (PLAYER_H * S) / h;
     model.scale.setScalar(s);
     model.position.y = -box.min.y * s;
     model.rotation.y = Math.PI / 2;
@@ -78,7 +80,7 @@ export class Player {
       g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
       return new THREE.CanvasTexture(c);
     })();
-    this.blob = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1.4).rotateX(-Math.PI / 2),
+    this.blob = new THREE.Mesh(new THREE.PlaneGeometry(1.4 * S, 1.4 * S).rotateX(-Math.PI / 2),
       new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false }));
     this.blob.renderOrder = 1;
     scene.add(this.blob);
@@ -93,7 +95,8 @@ export class Player {
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
       }),
     );
-    this.shieldMesh.position.y = 0.95;
+    this.shieldMesh.position.y = 0.95 * S;
+    this.shieldMesh.scale.setScalar(S);
     this.shieldMesh.visible = false;
     this.root.add(this.shieldMesh);
 
@@ -109,8 +112,8 @@ export class Player {
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
       }),
     );
-    this.aura.position.y = 0.95;
-    this.aura.scale.set(0.85, 1.2, 0.85);
+    this.aura.position.y = 0.95 * S;
+    this.aura.scale.set(0.85 * S, 1.2 * S, 0.85 * S);
     this.aura.visible = false;
     this.root.add(this.aura);
 
@@ -185,7 +188,7 @@ export class Player {
   jump(superJump) {
     if (!this.canJump()) {
       // inişe yakınsa zıplamayı beklet
-      this.jumpBuffer = 0.16; this.bufferedSuper = superJump;
+      this.jumpBuffer = 0.22; this.bufferedSuper = superJump;
       return false;
     }
     const h = superJump ? SUPER_JUMP_HEIGHT : JUMP_HEIGHT;
@@ -197,14 +200,14 @@ export class Player {
     this.slideQueued = false;
     const air = 2 * this.vy / GRAVITY;
     // zıplama klibinin havadaki bölümünü (0.45-1.75 sn) hava süresine sığdır
-    this.play('jump', 0.06, Math.max(1, 1.3 / air));
+    this.play('jump', 0.04, Math.max(1, 1.3 / air));
     if (this.actions.jump) this.actions.jump.time = 0.45;
     return true;
   }
 
   slide() {
     if (!this.grounded) {
-      this.vy = Math.min(this.vy, -30); // havadan hızla in
+      this.vy = Math.min(this.vy, -40); // havadan hızla in
       this.slideQueued = true;
       return true;
     }
@@ -250,10 +253,10 @@ export class Player {
     this.groundH = groundH;
     const tx = LANES[this.lane];
     const dx = tx - this.x;
-    // hızlı ama yumuşak şerit geçişi
-    const step = Math.sign(dx) * Math.min(Math.abs(dx), dt * 19);
-    this.x += step + (dx - step) * Math.min(1, dt * 6);
-    this.lean += ((-dx * 0.2) - this.lean) * Math.min(1, dt * 12);
+    // anında tepki veren şerit geçişi (~0,08 sn)
+    const step = Math.sign(dx) * Math.min(Math.abs(dx), dt * 30);
+    this.x += step + (dx - step) * Math.min(1, dt * 12);
+    this.lean += ((-dx * 0.16) - this.lean) * Math.min(1, dt * 16);
 
     let landed = false;
     if (this.coyote > 0) this.coyote -= dt;
@@ -266,7 +269,7 @@ export class Player {
       }
     } else if (groundH < this.y - 0.05) {
       // kenardan düştü: kısa süre hâlâ zıplayabilir
-      this.grounded = false; this.vy = 0; this.coyote = 0.12;
+      this.grounded = false; this.vy = 0; this.coyote = 0.15;
     } else {
       this.y = groundH;
     }
@@ -284,9 +287,9 @@ export class Player {
     }
 
     const target = this.sliding > 0.05 ? 1 : 0;
-    this.slideTilt += (target - this.slideTilt) * Math.min(1, dt * (target ? 22 : 14));
+    this.slideTilt += (target - this.slideTilt) * Math.min(1, dt * (target ? 38 : 16));
     this.pivot.rotation.set(0, 0, 0);
-    this.pivot.position.set(0, -SLIDE_POSE.drop * this.slideTilt, 0);
+    this.pivot.position.set(0, -SLIDE_POSE.drop * S * this.slideTilt, 0);
 
     this.root.position.set(this.x, this.y, 0);
     this.root.rotation.z = this.lean;
@@ -340,8 +343,8 @@ export class Player {
     this.aura.material.uniforms.t.value = t;
     this.magnetRing.visible = fx.magnet;
     if (fx.magnet) {
-      this.magnetRing.position.y = 0.1 + (Math.sin(t * 5) * 0.5 + 0.5) * 1.6;
-      this.magnetRing.scale.setScalar(1 + Math.sin(t * 9) * 0.08);
+      this.magnetRing.position.y = 0.1 + (Math.sin(t * 5) * 0.5 + 0.5) * 1.6 * S;
+      this.magnetRing.scale.setScalar(S * (1 + Math.sin(t * 9) * 0.08));
     }
   }
 }
