@@ -146,6 +146,7 @@ export class Player {
     this.coyote = 0;
     this.jumpBuffer = 0;
     this.bufferedSuper = false;
+    this.squash = 0; this.hop = 0; this.impact = 0;
     this.root.position.set(0, 0, 0);
     this.root.rotation.set(0, 0, 0);
     this.pivot.rotation.set(0, 0, 0);
@@ -174,6 +175,7 @@ export class Player {
     if (nl === this.lane) return false;
     this.prevLane = this.lane;
     this.lane = nl;
+    this.hop = 1;
     return true;
   }
 
@@ -201,6 +203,7 @@ export class Player {
     const air = 2 * this.vy / GRAVITY;
     // zıplama klibinin havadaki bölümünü (0.45-1.75 sn) hava süresine sığdır
     this.play('jump', 0.04, Math.max(1, 1.3 / air));
+    this.squash = superJump ? -0.5 : -0.35;
     if (this.actions.jump) this.actions.jump.time = 0.45;
     return true;
   }
@@ -265,7 +268,9 @@ export class Player {
       this.vy -= GRAVITY * dt;
       this.y += this.vy * dt;
       if (this.y <= groundH && this.vy <= 0) {
+        this.impact = -this.vy;
         this.y = groundH; this.vy = 0; this.grounded = true; landed = true;
+        this.squash = Math.min(0.5, 0.12 + this.impact * 0.018);
       }
     } else if (groundH < this.y - 0.05) {
       // kenardan düştü: kısa süre hâlâ zıplayabilir
@@ -288,8 +293,15 @@ export class Player {
 
     const target = this.sliding > 0.05 ? 1 : 0;
     this.slideTilt += (target - this.slideTilt) * Math.min(1, dt * (target ? 38 : 16));
-    this.pivot.rotation.set(0, 0, 0);
-    this.pivot.position.set(0, -SLIDE_POSE.drop * S * this.slideTilt, 0);
+    // canlı his: koşarken öne eğil, zıplarken uza, inerken basıl, şerit değiştirirken hafif sek
+    this.squash += (0 - this.squash) * Math.min(1, dt * 10);
+    const lean = this.grounded && this.sliding <= 0 ? 0.07 + Math.min(0.08, Math.max(0, (speed - 15) * 0.004)) : 0.02;
+    this.pivot.rotation.set(-lean * (1 - this.slideTilt), 0, 0);
+    let hopY = 0;
+    if (this.hop > 0) { this.hop = Math.max(0, this.hop - dt / 0.17); if (this.grounded && this.sliding <= 0) hopY = Math.sin((1 - this.hop) * Math.PI) * 0.16; }
+    const sq = this.squash;
+    this.pivot.scale.set(1 + sq * 0.22, 1 - sq * 0.3, 1 + sq * 0.22);
+    this.pivot.position.set(0, -SLIDE_POSE.drop * S * this.slideTilt + hopY, 0);
 
     this.root.position.set(this.x, this.y, 0);
     this.root.rotation.z = this.lean;

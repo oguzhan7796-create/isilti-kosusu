@@ -121,7 +121,9 @@
         <li><span>Müzik</span><button class="toggle" id="setMusic"></button></li>
         <li><span>Ses efektleri</span><button class="toggle" id="setSfx"></button></li>
         <li><span>Grafik</span><div class="seg" id="setQuality"><button data-q="low">Hızlı</button><button data-q="medium">Dengeli</button><button data-q="high">Güzel</button></div></li>
+        <li><span>FPS göster</span><button class="toggle" id="setFps"></button></li>
       </ul>
+      <p class="gpu-note" id="gpuNote" hidden></p>
       <div class="controls-help">
         <h3>Kontroller</h3>
         <p><b>Telefon:</b> sola/sağa kaydır = şerit · yukarı = zıpla · aşağı = kay · ⚡ = Renk Patlaması</p>
@@ -147,6 +149,7 @@
     </div>
     <div id="bossWrap" class="bossbar"><small><span id="bossName">MUHAFIZ</span> · <span id="bossTime">45</span> sn</small><div class="bar"><i id="bossBar"></i></div></div>
     <div id="powerList" class="power-list"></div>
+    <div id="fps" class="fps" hidden></div>
     <div id="missionPop" class="mission-pop"></div>
     <div id="banner" class="banner"><small id="bannerChapter"></small><h2 id="bannerTitle"></h2><p id="bannerLine"></p></div>
     <div id="toast" class="toast"></div>

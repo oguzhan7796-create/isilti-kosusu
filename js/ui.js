@@ -55,6 +55,7 @@ export class UI {
 
     const toggle = (key) => { save.settings[key] = !save.settings[key]; persist(); this.h.settings(); this.renderSettings(); };
     $('setMusic').addEventListener('click', () => toggle('music'));
+    $('setFps').addEventListener('click', () => { save.settings.fps = !save.settings.fps; persist(); this.h.click(); this.renderSettings(); $('fps').hidden = !save.settings.fps; });
     $('setSfx').addEventListener('click', () => toggle('sfx'));
     $('pauseMusic').addEventListener('click', () => toggle('music'));
     $('pauseSfx').addEventListener('click', () => toggle('sfx'));
@@ -228,6 +229,7 @@ export class UI {
   renderSettings() {
     $('setMusic').classList.toggle('on', save.settings.music);
     $('setSfx').classList.toggle('on', save.settings.sfx);
+    $('setFps').classList.toggle('on', !!save.settings.fps);
     $('pauseMusic').classList.toggle('off', !save.settings.music);
     $('pauseSfx').classList.toggle('off', !save.settings.sfx);
     const q = this.h.currentQuality();
@@ -424,6 +426,16 @@ export class UI {
     f.classList.add('on');
     requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on')));
   }
+
+  fps(v) {
+    const el = $('fps');
+    if (!save.settings.fps) { if (!el.hidden) el.hidden = true; return; }
+    el.hidden = false;
+    el.textContent = `${v} FPS`;
+    el.classList.toggle('low', v < 45);
+  }
+
+  gpuNote(text) { const el = $('gpuNote'); el.textContent = text; el.hidden = !text; }
 
   speedlines(on) {
     if (this.sl !== on) { $('speedlines').classList.toggle('on', on); this.sl = on; }

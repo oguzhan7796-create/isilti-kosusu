@@ -8,6 +8,7 @@ import {
   save, persist, multiplier, newMissionSet, isRunMission, totalKey, setReward, colorsRestored, ensureDaily,
 } from './save.js';
 import { colorUniforms } from './world.js';
+import { route, segmentName, weatherFor } from './themes.js';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const V1 = new THREE.Vector3();
@@ -34,10 +35,14 @@ export class Game {
     t.on('crash', (ob) => this.onCrash(ob));
     t.on('sidehit', () => this.onSideHit());
     t.on('hint', (h) => this.onHint(h));
-    t.on('honk', () => this.audio.honk());
+    t.on('honk', (o) => (o.type === 'roller' ? this.audio.rumble() : this.audio.honk()));
+    t.on('screech', () => this.audio.screech());
+    t.on('pad', (pd) => this.onPad(pd));
   }
 
   start() {
+    route.reset(0);
+    this.segIdx = 0;
     const tutorial = !save.tutorialDone;
     this.tutorial = tutorial;
     this.distance = 0;
@@ -83,7 +88,7 @@ export class Game {
     this.world.districtOverride = null;
     this.track.reset({ tutorial, diff: 0.1, crystalEvery: 60 });
     this.world.reset();
-    this.world.setDistrict(0, true);
+    this.world.setDistrict(0, true, 0, weatherFor(route.at(0)));
     this.applyBands(this.colorsAtStart, false);
     this.bandTargets = null;
     this.world.setTower(this.colorsAtStart, this.ui.colors);
@@ -258,6 +263,22 @@ export class Game {
     this.particles.emit(x, y, z, { n: 26, color: new THREE.Color(P.color).getHex(), speed: 5, vy: 2, life: 0.6, drift: true });
   }
 
+  // zıplama rampası: yükseğe fırlat
+  onPad(pd) {
+    if (!this.canAct()) return;
+    const p = this.player;
+    p.vy = Math.sqrt(2 * 50 * (this.powers.sneakers > 0 ? 6.4 : 5.2));
+    p.grounded = false; p.coyote = 0; p.sliding = 0; p.slideQueued = false; p.jumpBuffer = 0;
+    p.play('jump', 0.05, 1.0);
+    if (p.actions.jump) p.actions.jump.time = 0.45;
+    p.squash = 0.25;
+    this.run.jumps++;
+    this.audio.boing();
+    this.score += 30 * this.mult;
+    this.particles.emit(p.x, 0.4, 0, { n: 24, rainbow: true, speed: 4, vy: 4, life: 0.6, size: 0.35, drift: true });
+    this.shake = Math.max(this.shake, 0.12);
+  }
+
   onSmash(o) {
     this.run.smashes++;
     this.score += 50 * this.mult;
@@ -309,10 +330,9 @@ export class Game {
   // ---------- Gri Gölge karşılaşması ----------
   startEncounter() {
     this.encounter++;
-    const di = this.districtIdx % DISTRICTS.length;
-    const D = DISTRICTS[di];
+    const D = DISTRICTS[route.at(this.distance).t];
     const hp = Math.min(6, 2 + this.encounter);
-    this.boss.start({ hp, name: D.boss, final: di === 2 });
+    this.boss.start({ hp, name: D.boss, final: !!D.night });
     this.bossT = BOSS_TIME;
     this.track.pauseGen = true;
     this.ui.banner('GRİ GÖLGE SALDIRIYOR', D.boss, `${BOSS_TIME} saniyen var! Kristal topla, ⚡ ile vur.`, 3000);
@@ -556,6 +576,7 @@ export class Game {
     this.updateBridge(dt);
     if (p.buffered) { p.buffered = false; this.afterJump(); }
     if (landed) {
+      this.camKick = Math.min(0.32, 0.06 + p.impact * 0.012);
       this.audio.land();
       this.particles.emit(p.x, groundH + 0.1, 0.2, { n: 6, color: 0xe8dccb, speed: 1.5, vy: 0.8, life: 0.3, size: 0.3, drift: true });
     }
@@ -575,15 +596,20 @@ export class Game {
     this.particles.update(dt, this.dead ? 0 : this.speed);
 
     // bölgeler
+    // bölümler: rota her 1000 m'de yeni bir dünya + hâl seçer
     const idx = Math.floor(this.distance / DISTRICT_LEN);
     const skyIdx = Math.floor((this.distance + 110) / DISTRICT_LEN);
-    if (skyIdx !== this.skyIdx) { this.skyIdx = skyIdx; this.world.setDistrict(skyIdx % DISTRICTS.length); }
+    if (skyIdx !== this.skyIdx) {
+      this.skyIdx = skyIdx;
+      const seg = route.at(skyIdx * DISTRICT_LEN);
+      this.world.setDistrict(seg.t, false, seg.v, weatherFor(seg));
+    }
     if (idx !== this.districtIdx && !this.dead) {
       this.districtIdx = idx;
-      const di = idx % DISTRICTS.length;
-      const D = DISTRICTS[di];
-      this.audio.setSong(di);
-      if (!this.boss.active) this.ui.banner(`${Math.floor(this.distance)} M`, D.name, D.line, 2600);
+      const seg = route.at(this.distance);
+      const D = DISTRICTS[seg.t];
+      this.audio.setSong(D.song ?? 0);
+      if (!this.boss.active) this.ui.banner(`${Math.floor(this.distance)} M`, segmentName(seg), D.line, 2600);
       this.score += 500 * this.mult;
     }
 
@@ -662,6 +688,10 @@ export class Game {
     cp.x += (V1.x - cp.x) * kx; cp.y += (V1.y - cp.y) * k; cp.z += (V1.z - cp.z) * k;
     cl.x += (V2.x - cl.x) * kx; cl.y += (V2.y - cl.y) * k; cl.z += (V2.z - cl.z) * k;
     this.camera.position.copy(this.camPos);
+    // iniş sarsıntısı ve koşu salınımı
+    this.camKick = (this.camKick || 0) * Math.max(0, 1 - dt * 9);
+    this.camera.position.y -= this.camKick;
+    if (!this.dead && p.grounded) this.camera.position.y += Math.sin(this.time * (9 + this.speed * 0.3)) * 0.022;
     if (this.shake > 0) {
       this.shake -= dt;
       const s = this.shake * 0.4;

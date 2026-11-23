@@ -3,6 +3,10 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { DISTRICTS, DISTRICT_LEN } from './config.js';
+import { paintRoad, paintFacade, paintShop, buildStyle, skylineParts } from './styles.js';
+import { route, VARIANTS } from './themes.js';
+
+const GROUND = { snow: 0xf4f8fc, canyon: 0xd9ae78, forest: 0x4f7a32, fair: 0xbfe8a0, castle: 0x26213a };
 
 // Renk sistemi: Gökkuşağı Kulesi'nin 7 tonu ayrı ayrı geri gelir.
 // uBands[i] = o tonun canlılığı (0..1); uRunSat = koşu içi taban canlılık (patlamada 1)
@@ -44,6 +48,7 @@ export function patchSat(mat) {
 
 const CHUNK = 30;
 const AHEAD = 230;
+const _C = new THREE.Color();
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const M = new THREE.Matrix4();
@@ -184,22 +189,122 @@ export class World {
     }
   }
 
-  setDistrict(i, instant = false) {
+  // i: dünya, v: hâl (gündüz, gün batımı, gece, sis, fırtına), weather: hava efekti
+  setDistrict(i, instant = false, v = 0, weather = null) {
     this.district = i;
+    this.variant = v;
     const d = DISTRICTS[i];
+    const V = VARIANTS[v] ? VARIANTS[v].id : 'gun';
     const t = this.tgt;
+    const C = (hex) => _C.setHex(hex);
     t.top.setHex(d.skyTop); t.bottom.setHex(d.skyBottom); t.sun.setHex(d.sun); t.fog.setHex(d.fog);
     t.hemiSky.setHex(d.hemiSky); t.hemiGround.setHex(d.hemiGround);
-    t.stars = d.id === 'neon' ? 1 : 0;
-    t.sunI = d.id === 'neon' ? 0.7 : 2.4;
-    t.hemiI = d.id === 'neon' ? 1.3 : 1.35;
+    const night = !!d.night;
+    t.stars = night ? 1 : 0;
+    t.sunI = night ? 0.7 : 2.4;
+    t.hemiI = night ? 1.3 : 1.35;
+    t.fogNear = 60; t.fogFar = 235;
+    if (V === 'aksam') {
+      t.top.lerp(C(0x3b2a6e), 0.55); t.bottom.lerp(C(0xff8a50), 0.7); t.sun.setHex(0xffb070);
+      t.fog.lerp(C(0xf09a6a), 0.5); t.hemiSky.lerp(C(0xffc090), 0.45); t.sunI = night ? 1.0 : 1.7;
+    } else if (V === 'gece') {
+      t.top.setHex(0x050822); t.bottom.lerp(C(0x1a1040), 0.8); t.fog.lerp(C(0x15112e), 0.82); t.sun.setHex(0x9ab0ff);
+      t.hemiSky.lerp(C(0x6a78d8), 0.6); t.hemiGround.lerp(C(0x101020), 0.6); t.stars = 1; t.sunI = 0.55; t.hemiI = 1.2;
+    } else if (V === 'sis') {
+      t.fog.lerp(C(0xe6edf2), night ? 0.25 : 0.55); t.top.lerp(t.fog, 0.55); t.bottom.copy(t.fog);
+      t.fogNear = 18; t.fogFar = 130; t.sunI *= 0.75;
+    } else if (V === 'firtina') {
+      t.top.lerp(C(0x23283a), 0.75); t.bottom.lerp(C(0x5a6070), 0.65); t.fog.lerp(C(0x4a5064), 0.65);
+      t.sun.lerp(C(0xaab4cc), 0.6); t.sunI *= 0.45; t.hemiI *= 0.85; t.fogNear = 35; t.fogFar = 170;
+    }
+    this.storm = V === 'firtina' || d.props === 'castle';
     if (instant) {
       ['top', 'bottom', 'sun', 'fog', 'hemiSky', 'hemiGround'].forEach((k) => this.cur[k].copy(t[k]));
       this.cur.stars = t.stars; this.cur.sunI = t.sunI; this.cur.hemiI = t.hemiI;
+      this.scene.fog.near = t.fogNear; this.scene.fog.far = t.fogFar;
     }
     this.skylines.forEach((g, k) => { g.visible = k === i; });
-    if (this.clouds) this.clouds.visible = d.id !== 'neon';
+    if (this.clouds) this.clouds.visible = !night && V !== 'gece' && V !== 'sis';
+    this.setWeather(weather ?? d.weather);
     this.applyColors();
+  }
+
+  // ---------- hava: kar, tipi, yağmur, ateş böceği, konfeti, toz ----------
+  makeWeather() {
+    const N = 650;
+    const pos = new Float32Array(N * 3); const col = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) { pos[i * 3] = rnd(-24, 24); pos[i * 3 + 1] = rnd(0, 22); pos[i * 3 + 2] = rnd(-70, 8); col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = 1; }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const dot = (() => {
+      const c = document.createElement('canvas'); c.width = c.height = 32;
+      const g = c.getContext('2d'); const gr = g.createRadialGradient(16, 16, 1, 16, 16, 16);
+      gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.4, 'rgba(255,255,255,0.8)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = gr; g.fillRect(0, 0, 32, 32); return new THREE.CanvasTexture(c);
+    })();
+    const mat = new THREE.PointsMaterial({ size: 0.25, map: dot, vertexColors: true, transparent: true, depthWrite: false, fog: false });
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false; pts.visible = false; pts.renderOrder = 4;
+    this.scene.add(pts);
+    // yağmur: çizgi parçaları
+    const RN = 420; const rp = new Float32Array(RN * 6);
+    for (let i = 0; i < RN; i++) { const x = rnd(-24, 24); const y = rnd(0, 22); const z = rnd(-60, 8); rp.set([x, y, z, x + 0.05, y + 0.7, z + 0.25], i * 6); }
+    const rg = new THREE.BufferGeometry(); rg.setAttribute('position', new THREE.BufferAttribute(rp, 3));
+    const rain = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: 0xbfd4ff, transparent: true, opacity: 0.45, fog: false }));
+    rain.frustumCulled = false; rain.visible = false; rain.renderOrder = 4;
+    this.scene.add(rain);
+    this.wx = { pts, rain, kind: 'none', N, RN, t: 0 };
+  }
+
+  setWeather(kind) {
+    if (!this.wx) this.makeWeather();
+    const W = this.wx;
+    if (W.kind === kind) return;
+    W.kind = kind;
+    const m = W.pts.material; const col = W.pts.geometry.attributes.color;
+    W.pts.visible = ['snow', 'blizzard', 'fireflies', 'confetti', 'dust'].includes(kind);
+    W.rain.visible = kind === 'rain';
+    m.blending = kind === 'fireflies' ? THREE.AdditiveBlending : THREE.NormalBlending;
+    m.size = { snow: 0.28, blizzard: 0.22, fireflies: 0.32, confetti: 0.26, dust: 0.35 }[kind] || 0.25;
+    m.opacity = kind === 'dust' ? 0.35 : 1;
+    const palette = { snow: [0xffffff], blizzard: [0xffffff], fireflies: [0xd8ff6a, 0xfff07a], confetti: [0xff3cac, 0x39d8ff, 0xffd23f, 0x7cff6b, 0xb16cff], dust: [0xf0d8b0] }[kind] || [0xffffff];
+    for (let i = 0; i < W.N; i++) { _C.setHex(palette[i % palette.length]); col.setXYZ(i, _C.r, _C.g, _C.b); }
+    col.needsUpdate = true;
+    m.needsUpdate = true;
+  }
+
+  updateWeather(dt, speed, camera) {
+    const W = this.wx; if (!W || W.kind === 'none') return;
+    W.t += dt;
+    const cx = camera.position.x;
+    if (W.rain.visible) {
+      const a = W.rain.geometry.attributes.position;
+      for (let i = 0; i < W.RN; i++) {
+        let y = a.getY(i * 2) - 26 * dt; let z = a.getZ(i * 2) + speed * dt; let x = a.getX(i * 2);
+        if (y < 0) y += 22;
+        if (z > 8) z -= 68;
+        if (x < cx - 24) x += 48; else if (x > cx + 24) x -= 48;
+        a.setXYZ(i * 2, x, y, z); a.setXYZ(i * 2 + 1, x + 0.05, y + 0.7, z + 0.25);
+      }
+      a.needsUpdate = true;
+      return;
+    }
+    const a = W.pts.geometry.attributes.position;
+    const k = W.kind;
+    const vy = { snow: -2.2, blizzard: -5, fireflies: 0, confetti: -1.6, dust: -0.2 }[k];
+    const vx = { blizzard: 7, dust: 4 }[k] || 0;
+    for (let i = 0; i < W.N; i++) {
+      let x = a.getX(i); let y = a.getY(i); let z = a.getZ(i);
+      const ph = i * 1.7;
+      if (k === 'fireflies') { x += Math.sin(W.t * 0.9 + ph) * dt * 0.8; y += Math.cos(W.t * 1.1 + ph) * dt * 0.6; if (y < 0.3) y = 0.3 + rnd(0, 4); if (y > 7) y = rnd(0.5, 5); }
+      else { x += (vx + Math.sin(W.t * 1.5 + ph) * (k === 'confetti' ? 1.2 : 0.5)) * dt; y += vy * dt; if (y < 0) y += 22; }
+      z += speed * dt;
+      if (z > 8) z -= 78;
+      if (x < cx - 24) x += 48; else if (x > cx + 24) x -= 48;
+      a.setXYZ(i, x, y, z);
+    }
+    a.needsUpdate = true;
   }
 
   applyColors() {
@@ -263,7 +368,7 @@ export class World {
 
     const roadTex = canvasTex(256, 512, (g, w, h) => {
       g.fillStyle = D.roadA; g.fillRect(0, 0, w, h);
-      if (D.road === 'cobble') {
+      if (paintRoad(g, w, h, D)) { /* yeni dünya yolu */ } else if (D.road === 'cobble') {
         for (let y = 0; y < h; y += 16) {
           const off = (y / 16) % 2 ? 8 : 0;
           for (let x = -16 + off; x < w; x += 20) {
@@ -298,6 +403,7 @@ export class World {
 
     // cephe (üst katlar)
     const facade = canvasTex(256, 205, (g, w, h) => {
+      if (paintFacade(g, w, h, D)) return;
       g.fillStyle = neon ? '#2a2f4a' : '#f4efe6'; g.fillRect(0, 0, w, h);
       g.fillStyle = 'rgba(0,0,0,0.07)'; g.fillRect(0, h - 10, w, 10);
       for (let k = 0; k < 2; k++) {
@@ -333,6 +439,7 @@ export class World {
 
     // zemin kat dükkânları (4 m genişlik, 3.2 m yükseklik)
     const shopTex = canvasTex(256, 205, (g, w, h) => {
+      if (paintShop(g, w, h, D)) return;
       g.fillStyle = neon ? '#1a1530' : '#efe6d6'; g.fillRect(0, 0, w, h);
       // tabela bandı
       g.fillStyle = neon ? '#ff3cac' : '#ffffff'; g.fillRect(0, 8, w, 36);
@@ -395,16 +502,28 @@ export class World {
       if (neon) b.add('glow', P.boxB, s * 4.3, 0, -CHUNK / 2, 0x39f3ff, { sx: 0.18, sy: 0.24, sz: CHUNK, mul: 1.8 });
       else b.add('plain', P.boxB, s * 4.3, 0, -CHUNK / 2, 0xeae2d6, { sx: 0.22, sy: 0.26, sz: CHUNK });
     });
-    const groundCol = neon ? 0x15102a : coast ? 0xe9d7a8 : 0xc9a27e;
+    const groundCol = GROUND[D.props] ?? (neon ? 0x15102a : coast ? 0xe9d7a8 : 0xc9a27e);
     b.add('plain', P.plane, -110 - 7.7, -0.02, -CHUNK / 2, groundCol, { rx: -Math.PI / 2, sx: 220, sy: CHUNK });
     if (!coast) b.add('plain', P.plane, 110 + 7.7, -0.02, -CHUNK / 2, groundCol, { rx: -Math.PI / 2, sx: 220, sy: CHUNK });
 
     // binalar
-    const sides = coast ? [-1] : [-1, 1];
+    const styled = buildStyle(b, P, D, {
+      CHUNK, prep,
+      bproto: (w, h, d) => this.buildingProto(w, h, d),
+      shopPlane: (depth) => {
+        const tiles = Math.floor((depth - 0.6) / 4);
+        const geo = P.plane.clone(); const uv = geo.attributes.uv;
+        for (let k = 0; k < uv.count; k++) uv.setX(k, uv.getX(k) * Math.max(1, tiles));
+        return { geo, w: tiles >= 1 ? tiles * 4 : depth - 0.8 };
+      },
+    });
+    const sides = styled ? [] : coast ? [-1] : [-1, 1];
     sides.forEach((s) => {
-      let z = -rnd(0, 2);
-      while (z > -CHUNK + 2) {
-        const depth = pick(neon ? [8, 10, 12] : [6, 7, 8, 9]);
+      let z = -rnd(0.4, 2);
+      while (z > -CHUNK + 3.6) {
+        // bina parça sınırını aşmasın: komşu parçadaki binayla aynı yüzeyde üst üste binip titreşmesin
+        const room = z + CHUNK - 0.6;
+        const depth = Math.min(pick(neon ? [8, 10, 12] : [6, 7, 8, 9]), Math.floor(room * 2) / 2);
         const width = pick([7, 9, 11]);
         const h = neon ? pick([16, 22.4, 28.8, 35.2, 44.8]) : coast ? pick([6.4, 9.6, 9.6, 12.8]) : pick([6.4, 9.6, 12.8, 12.8, 16]);
         const cz = z - depth / 2;
@@ -414,10 +533,11 @@ export class World {
         // çatı kenarı / korniş
         b.add('plain', P.boxB, bx, h, cz, neon ? 0x141024 : 0xf4efe6, { sx: width + 0.4, sy: 0.35, sz: depth + 0.4, mul: neon ? 1 : 0.92 });
         // zemin kat dükkânı (yola bakan yüz)
-        const shopW = Math.max(4, Math.round((depth - 0.6) / 4) * 4);
+        const tiles = Math.floor((depth - 0.6) / 4);
+        const shopW = tiles >= 1 ? tiles * 4 : depth - 0.8;
         const shop = P.plane.clone();
         const uv = shop.attributes.uv;
-        for (let k = 0; k < uv.count; k++) uv.setX(k, uv.getX(k) * Math.round(shopW / 4));
+        for (let k = 0; k < uv.count; k++) uv.setX(k, uv.getX(k) * Math.max(1, tiles));
         b.add('shop', shop, s * 7.78, 1.6 + 0.22, cz, pick(D.accents), { ry: s > 0 ? -Math.PI / 2 : Math.PI / 2, sx: shopW, sy: 3.2, mul: 1 });
         shop.dispose();
 
@@ -470,8 +590,8 @@ export class World {
     }
     if (neon && Math.random() < 0.5) b.add('glow', P.torus, 0, 3.4, -rnd(5, 25), pick(D.accents), { mul: 2.2 });
 
-    // sokak lambaları
-    for (let k = 0; k < 2; k++) {
+    // sokak lambaları (kalede meşaleler var)
+    for (let k = 0; k < (D.props === 'castle' ? 0 : 2); k++) {
       const s = k % 2 ? 1 : -1;
       if (coast && s > 0) continue;
       const lz = -7 - k * 15;
@@ -489,7 +609,7 @@ export class World {
   }
 
   makeChunk(d0) {
-    const di = this.districtOverride != null ? this.districtOverride : Math.floor(Math.max(0, d0) / DISTRICT_LEN) % DISTRICTS.length;
+    const di = this.districtOverride != null ? this.districtOverride : route.at(Math.max(0, d0)).t;
     if (!this.pool) this.prebuild();
     const r = this.R(di);
     const coast = DISTRICTS[di].props === 'coast';
@@ -584,7 +704,7 @@ export class World {
       const parts = [];
       const fogMix = new THREE.Color(D.fog);
       const add = (geo, col) => parts.push(colorize(prep(geo), col));
-      for (let k = 0; k < 70; k++) {
+      for (let k = 0; k < (skylineParts(D, add, fogMix) ? 0 : 70); k++) {
         const x = -260 + k * 7.5 + rnd(-2, 2);
         if (Math.abs(x) < 25) continue;
         const h = D.props === 'neon' ? rnd(30, 110) : D.props === 'coast' ? rnd(6, 22) : rnd(12, 40);
@@ -611,6 +731,7 @@ export class World {
   }
 
   reset() {
+    this.lastDist = undefined;
     this.chunks.forEach((c) => this.disposeChunk(c));
     this.chunks = [];
     this.nextD = -CHUNK;
@@ -638,6 +759,15 @@ export class World {
     ['top', 'bottom', 'sun', 'fog', 'hemiSky', 'hemiGround'].forEach((key) => c[key].lerp(t[key], k));
     c.stars += (t.stars - c.stars) * k; c.sunI += (t.sunI - c.sunI) * k; c.hemiI += (t.hemiI - c.hemiI) * k;
     this.applyColors();
+    const fz = this.scene.fog;
+    if (t.fogNear !== undefined) { fz.near += (t.fogNear - fz.near) * k; fz.far += (t.fogFar - fz.far) * k; }
+    // hava efekti dünya ile birlikte akar
+    const spd = this.lastDist !== undefined && dt > 0 ? Math.min(500, Math.max(0, (distance - this.lastDist) / dt)) : 0;
+    this.lastDist = distance;
+    this.updateWeather(dt, spd, camera);
+    // fırtınada şimşek
+    if (this.storm && Math.random() < dt * 0.15) this.flash = 1;
+    if (this.flash > 0) { this.flash -= dt * 5; this.hemi.intensity = c.hemiI + Math.max(0, this.flash) * 2.2; }
 
     if (this.res[1] && this.res[1].water) {
       this.res[1].water.offset.x = this.time * 0.02;

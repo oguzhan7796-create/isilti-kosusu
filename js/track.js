@@ -3,7 +3,9 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makePowerPickup, animatePickup } from './pickups.js';
-import { LANES, BUS_H, DISTRICTS, DISTRICT_LEN, PLAYER_W, PLAYER_DEPTH, JUMP_HEIGHT, GRAVITY } from './config.js';
+import { LANES, BUS_H, DISTRICTS, DISTRICT_LEN, PLAYER_W, PLAYER_DEPTH, JUMP_HEIGHT, GRAVITY, OB_COLORS } from './config.js';
+import { route } from './themes.js';
+import { SHAPES, FOES, foeKey } from './foes.js';
 import { patchSat } from './world.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -123,6 +125,8 @@ export class Track {
 
   reset({ tutorial = false, finish = 0, diff = 0, crystalEvery = 70, noSpawn = false } = {}) {
     this.obstacles.forEach((o) => this.group.remove(o.mesh));
+    (this.pads || []).forEach((p) => this.group.remove(p.mesh));
+    this.pads = [];
     this.crystals.forEach((c) => this.group.remove(c.mesh));
     this.powers.forEach((p) => this.group.remove(p.mesh));
     if (this.gate) { this.group.remove(this.gate); this.gate = null; }
@@ -145,7 +149,7 @@ export class Track {
 
   districtAt(d) {
     if (this.districtOverride != null) return this.districtOverride;
-    return Math.floor(Math.max(0, d) / DISTRICT_LEN) % DISTRICTS.length;
+    return route.at(Math.max(0, d)).t;
   }
 
   // ---------- atlas ve geometriler (bölgeye göre) ----------
@@ -155,9 +159,10 @@ export class Track {
     const neon = D.id === 'neon';
     const sahil = D.id === 'sahil';
     const c = {};
-    const bodyCol = neon ? '#5b2a86' : sahil ? '#1fb5c9' : '#c62f2f';
-    const trim = neon ? '#ff3cac' : '#f6e7c8';
-    const stripeCol = neon ? '#ff3cac' : sahil ? '#ff4d4d' : '#e76f2e';
+    const OC = OB_COLORS[D.id] || OB_COLORS.carsi;
+    const bodyCol = OC.body;
+    const trim = OC.trim;
+    const stripeCol = OC.stripe;
     const rect = (g, R, fill) => { g.fillStyle = fill; g.fillRect(R[0], R[1], R[2], R[3]); };
 
     const drawAtlas = (g, emissive) => {
@@ -179,7 +184,7 @@ export class Track {
         g.fillStyle = trim; g.fillRect(fx, fy + 76, fw, 8);
         g.fillStyle = '#fff6c2'; g.beginPath(); g.arc(fx + 24, fy + 100, 11, 0, 7); g.arc(fx + 104, fy + 100, 11, 0, 7); g.fill();
         g.fillStyle = '#111'; g.fillRect(fx + 40, fy + 94, 48, 14);
-        rect(g, RG.ROOF, neon ? '#2a1640' : sahil ? '#178a9a' : '#8e2424');
+        rect(g, RG.ROOF, OC.roof);
         g.fillStyle = 'rgba(255,255,255,0.18)'; for (let k = 0; k < 4; k++) g.fillRect(RG.ROOF[0] + 6 + k * 15, RG.ROOF[1] + 4, 6, RG.ROOF[3] - 8);
         rect(g, RG.DARK, '#1b1b1f');
         // şerit
@@ -188,20 +193,20 @@ export class Track {
           g.fillStyle = (x / 32) % 2 ? '#ffffff' : stripeCol;
           g.beginPath(); g.moveTo(tx + x, ty); g.lineTo(tx + x + 32, ty); g.lineTo(tx + x + 64, ty + th); g.lineTo(tx + x + 32, ty + th); g.fill();
         }
-        rect(g, RG.POST, neon ? '#39f3ff' : '#5b4636');
-        rect(g, RG.METAL, neon ? '#2b2450' : '#3b3b46');
+        rect(g, RG.POST, OC.post);
+        rect(g, RG.METAL, OC.metal);
         rect(g, RG.GLOWR, '#ff2d55');
         rect(g, RG.GLOWC, '#fff6c2');
         // tabela
         const [gx, gy, gw, gh] = RG.SIGN;
-        rect(g, RG.SIGN, neon ? '#160c2c' : sahil ? '#0077b6' : '#7a2e1d');
+        rect(g, RG.SIGN, OC.sign);
         g.strokeStyle = neon ? '#ff3cac' : '#ffd166'; g.lineWidth = 10; g.strokeRect(gx + 8, gy + 8, gw - 16, gh - 16);
         g.fillStyle = neon ? '#39f3ff' : '#ffffff';
         g.font = '900 40px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-        g.fillText(neon ? '▼ KAY ▼' : sahil ? '≈ SAHİL ≈' : '✦ ÇARŞI ✦', gx + gw / 2, gy + gh / 2 + 2);
+        g.fillText(D.sign || '▼ KAY ▼', gx + gw / 2, gy + gh / 2 + 2);
         // rampa
         const [rx, ry, rw, rh] = RG.RAMP;
-        rect(g, RG.RAMP, neon ? '#2b2450' : '#c9c2b4');
+        rect(g, RG.RAMP, OC.ramp);
         g.fillStyle = neon ? '#39f3ff' : '#8f877a';
         for (let y = 0; y < rh; y += 20) g.fillRect(rx, ry + y, rw, 6);
         g.fillStyle = stripeCol; g.fillRect(rx, ry, 10, rh); g.fillRect(rx + rw - 10, ry, 10, rh);
@@ -300,8 +305,91 @@ export class Track {
       atlasAll(new THREE.SphereGeometry(0.45, 12, 8).translate(-4.7, 6.8, 0), P.GOLD),
       atlasAll(new THREE.SphereGeometry(0.45, 12, 8).translate(4.7, 6.8, 0), P.GOLD),
     ]);
+    // yeni dünyalar: kendi bariyer, tabela ve araç modelleri
+    const S = SHAPES[D.props];
+    if (S) {
+      c.matV = patchSat(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.08 }));
+      const bar = S.barrier(); const hi = S.high();
+      c.vgeo = { barrier: bar.geo, high: hi.geo };
+      c.vglow = { barrier: bar.glow, high: hi.glow };
+      const busCache = new Map();
+      c.vbus = (len) => { if (!busCache.has(len)) busCache.set(len, S.bus(len)); return busCache.get(len); };
+    }
+    c.matG = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+    c.foe = {};
     this.cache[di] = c;
     return c;
+  }
+
+  // düşman/rampa kaynakları (dünyaya göre görünüm)
+  foeRes(di, kind) {
+    const c = this.C(di);
+    if (c.foe[kind]) return c.foe[kind];
+    const set = FOES[kind];
+    const make = set[foeKey(DISTRICTS[di])] || set.default || set[Object.keys(set)[0]];
+    const r = make();
+    r.mat = patchSat(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.1, side: THREE.DoubleSide }));
+    r.glowMat = c.matG;
+    c.foe[kind] = r;
+    return r;
+  }
+
+  addFoe(kind, lane, d, opts = {}) {
+    const R = this.foeRes(this.districtAt(d), kind);
+    const mesh = new THREE.Group();
+    let wings = null; let inner = null;
+    if (kind === 'diver') {
+      mesh.add(new THREE.Mesh(R.body, R.mat));
+      if (R.eyes) mesh.add(new THREE.Mesh(R.eyes, R.glowMat));
+      if (R.wing) { const wl = new THREE.Mesh(R.wing, R.mat); const wr = new THREE.Mesh(R.wing, R.mat); wr.scale.x = -1; mesh.add(wl, wr); wings = [wl, wr]; }
+    } else {
+      inner = new THREE.Mesh(R.geo, R.mat);
+      if (R.glow) inner.add(new THREE.Mesh(R.glow, R.glowMat));
+      mesh.add(inner);
+    }
+    mesh.position.set(LANES[lane] || 0, 0, -200);
+    this.group.add(mesh);
+    const o = {
+      type: kind, lane, d, len: 1.0, top: 1.1, bottom: 0, w: 1.3, mesh, vel: opts.vel || 0,
+      prevZ: false, prevX: false, smashed: false, honked: false, foe: true, wings, inner,
+      r: R.r || 0.5, ph: opts.phase ?? Math.random() * 6.28, sp: opts.sp || 1.6, y: 0,
+    };
+    if (kind === 'roller') { o.top = o.r * 2 + 0.05; o.w = 1.5; o.len = o.r * 2; }
+    if (kind === 'crosser') { o.top = 1.15; o.w = 1.2; o.len = 1.0; o.x = 0; }
+    if (kind === 'diver') { o.top = 1.95; o.bottom = 1.15; o.w = 1.3; o.len = 0.9; o.y = 4.8; }
+    this.obstacles.push(o);
+    return o;
+  }
+
+  updateFoe(o, z, t, dt) {
+    const m = o.mesh;
+    if (o.type === 'roller') {
+      m.position.set(LANES[o.lane], o.r, z);
+      o.inner.rotation.x += (o.vel / o.r) * dt;
+    } else if (o.type === 'crosser') {
+      const a = o.ph + t * o.sp;
+      o.x = 2.4 * Math.sin(a);
+      m.position.set(o.x, Math.abs(Math.sin(t * 9 + o.ph)) * 0.08, z);
+      o.inner.rotation.y = Math.cos(a) > 0 ? Math.PI / 2 : -Math.PI / 2;
+    } else if (o.type === 'diver') {
+      const f = clamp((z + 34) / 20, 0, 1);
+      const e = f * f * (3 - 2 * f);
+      o.y = lerp(4.8, 1.55, e);
+      o.bottom = o.y - 0.4; o.top = o.y + 0.4;
+      m.position.set(LANES[o.lane], o.y + Math.sin(t * 5 + o.ph) * 0.08 * (1 - e), z);
+      m.rotation.x = -0.35 * e;
+      if (o.wings) { const w = Math.sin(t * 16 + o.ph) * 0.65; o.wings[0].rotation.z = w; o.wings[1].rotation.z = -w; }
+      if (!o.screeched && z > -34) { o.screeched = true; this.emit('screech', o); }
+    }
+  }
+
+  addPad(lane, d) {
+    const R = this.foeRes(this.districtAt(d), 'pad');
+    const mesh = new THREE.Mesh(R.geo, R.mat);
+    if (R.glow) mesh.add(new THREE.Mesh(R.glow, R.glowMat));
+    mesh.position.set(LANES[lane], 0, -200);
+    this.group.add(mesh);
+    this.pads.push({ lane, d, mesh, used: false, sq: 0 });
   }
 
   // ---------- üretim ----------
@@ -314,7 +402,13 @@ export class Track {
     else if (type === 'ramp') { len = RAMP_LEN; top = BUS_H; geo = c.rampGeo; }
     else if (type === 'laserLow') { len = 0.35; top = 0.85; geo = c.laserLowGeo; mat = c.matPlain; lane = 1; }
     else if (type === 'laserHigh') { len = 0.35; top = 2.2; bottom = 1.3; geo = c.laserHighGeo; mat = c.matPlain; lane = 1; }
+    let glow = null;
+    if (c.matV && (type === 'barrier' || type === 'high' || type === 'bus')) {
+      const v = type === 'bus' ? c.vbus(len) : { geo: c.vgeo[type], glow: c.vglow[type] };
+      geo = v.geo; glow = v.glow; mat = c.matV;
+    }
     const mesh = new THREE.Mesh(geo, mat);
+    if (glow) mesh.add(new THREE.Mesh(glow, c.matG));
     mesh.castShadow = type === 'bus' || type === 'high' || type === 'barrier';
     mesh.position.set(LANES[lane], 0, 0);
     if (opts.vel) mesh.rotation.y = 0;
@@ -401,6 +495,12 @@ export class Track {
       single: Math.max(0.3, 3 - 2.4 * t), double: 0.8 + 2 * t, bus: 2.2, full: 0.5 + 1.4 * t,
       combo: t > 0.25 ? 2 * t : 0, moving: t > 0.35 ? 1.5 * t : 0, zigzag: t > 0.45 ? 1.4 * t : 0, coins: Math.max(0.3, 1.3 - t),
     };
+    // dünyaya özel düşmanlar ve zıplama rampaları
+    const foes = DISTRICTS[this.districtAt(D)].foes || [];
+    W.roller = foes.includes('roller') && t > 0.12 ? 1.3 + t : 0;
+    W.diver = foes.includes('diver') && t > 0.1 ? 1.3 + t : 0;
+    W.crosser = foes.includes('crosser') && t > 0.08 ? 1.3 + t : 0;
+    W.pad = t > 0.05 ? (foes.includes('pad') ? 1.6 : 0.9) : 0;
     let r = Math.random() * Object.values(W).reduce((a, b) => a + b, 0);
     let kind = 'coins';
     for (const [k, w] of Object.entries(W)) { if (r < w) { kind = k; break; } r -= w; }
@@ -472,6 +572,33 @@ export class Track {
       this.addCoinLine(b2, D, 5);
       this.addCoinLine(a, D + 17, 6);
       used = 34;
+    } else if (kind === 'roller') {
+      // şeritte sana doğru yuvarlanan: zıpla ya da kaç
+      const vel = 8 + 7 * Math.min(1, t);
+      this.addFoe('roller', lanes[0], D + 30, { vel });
+      if (t > 0.55) this.addFoe('roller', lanes[1], D + 50, { vel: vel * 0.9 });
+      this.addCoinLine(lanes[2], D, 8);
+      used = 16;
+    } else if (kind === 'diver') {
+      // havadan dalan: kay ya da şerit değiştir
+      this.addFoe('diver', lanes[0], D);
+      this.addCoinLine(lanes[0], D - 6, 5, 2.2, () => 0.5);
+      if (t > 0.45) this.addFoe('diver', lanes[1], D + 11);
+      used = 14;
+    } else if (kind === 'crosser') {
+      // şeritler arasında gidip gelen: zamanla ya da üstünden zıpla
+      this.addFoe('crosser', 1, D, { sp: 1.4 + t * 0.8 });
+      arcOver(lanes[0], D);
+      if (t > 0.6) this.addObstacle('barrier', lanes[1], D + 16);
+      used = 18;
+    } else if (kind === 'pad') {
+      // zıplama rampası: yükseğe fırlatır, havada altın yayı; ilerideyse aracın üstüne in
+      const l = lanes[0];
+      this.addPad(l, D);
+      const padAir = 2 * Math.sqrt(2 * GRAVITY * 5.2) / GRAVITY;
+      const span = padAir * speed;
+      this.addCoinLine(l, D + span * 0.1, 8, span * 0.8 / 8, (d) => { const f = clamp((d - D) / span, 0, 1); return 1.0 + 5.2 * 4 * f * (1 - f); });
+      if (t > 0.3 && this.laneFree(l, D + span * 0.5, D + span * 0.5 + 16)) { this.addObstacle('bus', l, D + span * 0.55 + 7, { len: 14 }); used = span * 0.55 + 14; } else used = span;
     } else {
       const l = lanes[0];
       if (Math.random() < 0.5) this.addCoinLine(l, D, 10);
@@ -526,6 +653,7 @@ export class Track {
       const z = distance - o.d;
       if (z - o.len / 2 > 12) { this.group.remove(o.mesh); this.obstacles.splice(k, 1); continue; }
       o.mesh.position.z = z;
+      if (o.foe && !o.smashed) this.updateFoe(o, z, t, dt);
       if (o.smashed) {
         o.mesh.position.y -= dt * 6; o.mesh.rotation.x += dt * 4; o.mesh.scale.multiplyScalar(Math.max(0, 1 - dt * 3));
         continue;
@@ -534,12 +662,14 @@ export class Track {
 
       const zNear = z + o.len / 2; const zFar = z - o.len / 2;
       const zOv = zFar < PD && zNear > -PD;
-      const xOv = Math.abs(px - LANES[o.lane]) < o.w / 2 + PLAYER_W / 2 - 0.05;
+      const xOv = Math.abs(px - (o.x !== undefined ? o.x : LANES[o.lane])) < o.w / 2 + PLAYER_W / 2 - 0.05;
 
       if (zOv && xOv && !player.dead) {
         let hit = false;
         if (o.type === 'barrier' || o.type === 'laserLow') hit = pf < o.top - 0.15;
         else if (o.type === 'high' || o.type === 'laserHigh') hit = pf + ph > o.bottom;
+        else if (o.type === 'roller' || o.type === 'crosser') hit = pf < o.top - 0.15;
+        else if (o.type === 'diver') hit = pf + ph > o.bottom && pf < o.top;
         else if (o.type === 'bus') hit = pf < o.top - 0.4;
         else if (o.type === 'ramp') hit = pf < o.top * clamp(zNear / o.len, 0, 1) - 0.7;
         if (hit) {
@@ -613,6 +743,17 @@ export class Track {
       if (Math.abs(LANES[p.lane] - px) < 1.0 && Math.abs(z) < 1.0 && Math.abs(p.y - py) < 1.6 && !player.dead) {
         this.group.remove(p.mesh); this.powers.splice(k, 1);
         this.emit('power', p.kind, LANES[p.lane], p.y, z);
+      }
+    }
+
+    for (let k = this.pads.length - 1; k >= 0; k--) {
+      const p = this.pads[k];
+      const z = distance - p.d;
+      if (z > 10) { this.group.remove(p.mesh); this.pads.splice(k, 1); continue; }
+      p.mesh.position.z = z;
+      if (p.sq > 0) { p.sq = Math.max(0, p.sq - dt); p.mesh.scale.y = 1 - Math.sin((p.sq / 0.3) * Math.PI) * 0.5; }
+      if (!p.used && !player.dead && Math.abs(LANES[p.lane] - px) < 0.95 && Math.abs(z) < 0.9 && player.y < 0.9) {
+        p.used = true; p.sq = 0.3; this.emit('pad', p);
       }
     }
 

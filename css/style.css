@@ -276,3 +276,8 @@ h3 { margin: 0 0 4px; font-size: 18px; }
 .turbo.on { box-shadow: 0 0 24px #ffd23f, 0 6px 18px rgba(0,0,0,.45); }
 @keyframes turbo-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .turbo.on::before { animation: none; } }
+
+.fps { position: absolute; top: calc(56px + var(--safe-t)); left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums;
+  background: rgba(0,0,0,.45); color: #7cff6b; padding: 2px 8px; border-radius: 99px; pointer-events: none; }
+.fps.low { color: #ff6b6b; }
+.gpu-note { margin: 10px 4px 0; padding: 10px 12px; border-radius: 12px; background: rgba(255,107,107,.15); color: #ffd6d6; font-size: 13px; line-height: 1.4; }

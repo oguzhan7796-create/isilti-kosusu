@@ -252,6 +252,9 @@ export class AudioEngine {
   restore() { [0, 4, 7, 11, 12, 16, 19, 24].forEach((iv, i) => this.tone(mtof(67 + iv), 0.3, 'sine', 0.08, null, i * 0.06)); }
   warn() { this.tone(880, 0.12, 'square', 0.07); this.tone(880, 0.12, 'square', 0.07, null, 0.18); }
   honk() { this.tone(330, 0.35, 'sawtooth', 0.1); this.tone(415, 0.35, 'sawtooth', 0.08); }
+  rumble() { this.noiseHit(0.7, 180, 0.28, 'lowpass'); this.tone(70, 0.6, 'sawtooth', 0.08, 50); }
+  screech() { this.tone(1400, 0.35, 'sawtooth', 0.05, 700); this.tone(1800, 0.25, 'square', 0.03, 900, 0.05); }
+  boing() { this.tone(180, 0.35, 'sine', 0.22, 720); this.tone(360, 0.25, 'triangle', 0.08, 1100, 0.03); }
   bossIntro() { [0, -1, -5, -12].forEach((iv, i) => this.tone(mtof(52 + iv), 0.5, 'sawtooth', 0.12, null, i * 0.22)); this.noiseHit(1.2, 200, 0.3, 'lowpass', 0.1); }
   bossHit() { this.noiseHit(0.5, 2500, 0.3, 'bandpass'); [0, 7, 12, 19].forEach((iv, i) => this.tone(mtof(64 + iv), 0.35, 'square', 0.07, null, i * 0.05)); }
   win() { [0, 4, 7, 12, 7, 12, 16, 19, 24].forEach((iv, i) => this.tone(mtof(64 + iv), 0.28, 'triangle', 0.11, null, i * 0.09)); }

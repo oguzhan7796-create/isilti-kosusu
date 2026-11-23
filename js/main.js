@@ -2,7 +2,8 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { STORY, HERO_NAME, COLORS, HERO_SCALE } from './config.js';
+import { STORY, HERO_NAME, COLORS, HERO_SCALE, DISTRICTS } from './config.js';
+import { route } from './themes.js';
 import { save, persist, resetProgress, colorsRestored } from './save.js';
 import { World, colorUniforms } from './world.js';
 import { Track } from './track.js';
@@ -31,6 +32,11 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.92;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.type = THREE.PCFShadowMap;
+
+// yazılımla çizim (donanım hızlandırma kapalı) tespiti: oyun çok yavaş çalışır, kullanıcı uyarılır
+const GPU = (() => { try { const gl = renderer.getContext(); const ext = gl.getExtension('WEBGL_debug_renderer_info'); return ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : ''; } catch (e) { return ''; } })();
+const softGPU = /swiftshader|llvmpipe|software|basic render/i.test(GPU);
+if (softGPU && save.settings.quality === 'auto') quality = 'low';
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 900);
@@ -84,16 +90,22 @@ function resize() {
 }
 addEventListener('resize', resize);
 
-// uyarlamalı çözünürlük
-let ema = 1 / 60; let evalT = 0; let goodT = 0;
-function adapt(realDt) {
-  if (state !== 'play' || countdown > 0) return;
-  ema += (realDt - ema) * 0.08;
-  evalT += realDt;
-  if (evalT < 1) return;
-  evalT = 0;
-  if (ema > 1 / 42 && dynScale > 0.55) { dynScale = Math.max(0.55, dynScale * 0.85); goodT = 0; resize(); }
-  else if (ema < 1 / 57 && dynScale < 1) { goodT++; if (goodT >= 3) { dynScale = Math.min(1, dynScale * 1.1); goodT = 0; resize(); } }
+// uyarlamalı çözünürlük: ekranın yenileme hızına (60/120/165 Hz) yetişemeyip kare kaçırıyorsa
+// çözünürlüğü biraz düşürür. Kaçırılan kare = ekran aralığının 1,5 katından uzun süren kare.
+// Değişiklik nadiren yapılır (her değişiklik kısa bir takılmaya yol açar).
+let vsync = 1; let winMin = 1; let winN = 0; let winMiss = 0; let winT = 0; let goodWins = 0;
+function adapt(raw) {
+  if (state !== 'play' || countdown > 0 || raw > 0.25) return;
+  winMin = Math.min(winMin, raw);
+  winN++; winT += raw;
+  if (raw > vsync * 1.5) winMiss++;
+  if (winT < 2) return;
+  vsync = Math.min(Math.max(winMin, 1 / 240), 1 / 30);
+  const ratio = winMiss / winN;
+  winMin = 1; winN = 0; winMiss = 0; winT = 0;
+  if (ratio > 0.12 && dynScale > 0.6) { dynScale = Math.max(0.6, dynScale * 0.85); goodWins = 0; resize(); }
+  else if (ratio < 0.02) { goodWins++; if (goodWins >= 5 && dynScale < 1) { dynScale = Math.min(1, dynScale * 1.08); goodWins = 0; resize(); } }
+  else goodWins = 0;
 }
 
 // ---------- arayüz ----------
@@ -211,6 +223,7 @@ function toMenu() {
 }
 
 function setupMenuScene() {
+  route.reset(0);
   track.districtOverride = null;
   world.districtOverride = null;
   track.reset({ noSpawn: true });
@@ -239,11 +252,14 @@ addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); }
 // ---------- ön ısıtma: tüm gölgelendiricileri yüklemede derle (koşu sırasında takılma olmasın) ----------
 function prewarm() {
   const P = PRESETS[quality];
-  for (let di = 0; di < 3; di++) {
+  for (let di = 0; di < DISTRICTS.length; di++) {
     world.districtOverride = di; world.makeChunk(-2000 - di * 40);
     track.districtOverride = di;
     ['barrier', 'high', 'bus', 'ramp', 'laserLow', 'laserHigh'].forEach((t, k) => track.addObstacle(t, k % 3, 2000 + di * 40 + k * 3));
+    ['roller', 'crosser', 'diver'].forEach((f, k) => track.addFoe(f, k % 3, 2020 + di * 40 + k * 3));
+    track.addPad(1, 2030 + di * 40);
   }
+  world.setWeather('snow'); world.wx.rain.visible = true;
   track.addCrystal(1, 30); ['magnet', 'shield', 'sneakers', 'double'].forEach((k, i) => track.addPower(i % 3, 40 + i * 3, k));
   for (let k = 0; k < 3; k++) track.addCoin(1, 20 + k);
   track.obstacles.forEach((o) => { o.mesh.position.z = -10; });
@@ -312,10 +328,15 @@ async function boot() {
   prewarm();
   setupMenuScene();
   ui.loading(1, 'Hazır!');
+  if (softGPU) {
+    const msg = 'Tarayıcında donanım hızlandırma kapalı görünüyor, bu yüzden oyun yavaş ve takılarak çalışır. Chrome: Ayarlar > Sistem > "Kullanılabilir olduğunda grafik hızlandırmayı kullan" seçeneğini aç ve tarayıcıyı yeniden başlat.';
+    ui.gpuNote(msg);
+    setTimeout(() => ui.notice('⚠️ Donanım hızlandırma kapalı: Ayarlar ekranına bak', 5000), 600);
+  }
   // yalnızca ?debug ile: performans ölçümü için erişim
   if (new URLSearchParams(location.search).has('debug')) {
     window.__isilti = {
-      game, player, track, world, renderer, scene, camera, save, getState: () => state,
+      game, player, track, world, renderer, scene, camera, save, getState: () => state, dbg,
       // n kare boyunca oyunu ilerletip her karenin (mantık + çizim) süresini ölçer
       bench: (n = 600, bot = null) => {
         const gl = renderer.getContext(); const px = new Uint8Array(4); const times = [];
@@ -344,12 +365,24 @@ async function boot() {
 }
 
 // ---------- döngü ----------
-const clock = new THREE.Clock();
-function frame() {
+// dt, requestAnimationFrame zaman damgasından alınır (ekran yenilemesine hizalı, titreşimsiz).
+// Ekran periyoduna yakın kareler periyoda oturtulur: hareket eşit adımlarla ilerler, kayma/titreme olmaz.
+const dbg = { onFrame: null, rec: null };
+let lastNow = 0;
+let fpsN = 0; let fpsT = 0;
+let period = 1 / 60;
+function frame(now) {
   requestAnimationFrame(frame);
-  const realDt = Math.min(0.5, clock.getDelta());
+  const raw = lastNow ? Math.min(0.5, (now - lastNow) / 1000) : 1 / 60;
+  lastNow = now;
+  if (raw > period * 0.5 && raw < period * 1.6) period += (raw - period) * 0.05;
+  const realDt = Math.abs(raw - period) < period * 0.3 ? period : raw;
   const dt = Math.min(0.05, realDt);
+  fpsN++; fpsT += raw;
+  if (fpsT >= 0.5) { ui.fps(Math.round(fpsN / fpsT)); fpsN = 0; fpsT = 0; }
   if (!world || !game) return;
+  const t0 = dbg.rec ? performance.now() : 0;
+  if (dbg.onFrame && state === 'play') dbg.onFrame();
 
   if (state === 'play') {
     if (countdown > 0) {
@@ -361,7 +394,7 @@ function frame() {
     } else {
       game.update(dt);
     }
-    adapt(realDt);
+    adapt(raw);
   } else if (state === 'over') {
     game.update(dt);
   } else if (state === 'menu' || state === 'story') {
@@ -379,15 +412,16 @@ function frame() {
   }
 
   if (composer) {
-    const night = world.district === 2;
+    const night = !!(DISTRICTS[world.district] && DISTRICTS[world.district].night) || world.variant === 2;
     composer.bloom.threshold = night ? 0.85 : 1.8;
     composer.bloom.strength = night ? 0.55 : 0.35;
     composer.render();
   } else renderer.render(scene, camera);
+  if (dbg.rec) dbg.rec.push(now, raw * 1000, performance.now() - t0, dt * 1000);
 }
 
 boot().catch((e) => {
   console.error(e);
   ui.loading(1, 'Yüklenemedi. Sayfayı yenileyin.');
 });
-frame();
+requestAnimationFrame(frame);
